@@ -12,6 +12,7 @@ skills-lock.json
 /NOTES.md
 /REDESIGN_PLAN.md
 /RESOURCES.md
+/README.md
 
 # General rule to prevent uploading any root-level markdown planning files
 /*.md
