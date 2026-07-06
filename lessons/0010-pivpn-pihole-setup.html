@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lesson 10: การสร้างระบบเครือข่ายและความปลอดภัยส่วนบุคคล (PiVPN, Tailscale และ Pi-hole)</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <h1>บทเรียนที่ 10: การสร้างระบบเครือข่ายและความปลอดภัยส่วนบุคคล (PiVPN, Tailscale และ Pi-hole)</h1>
+    <p>ในบทเรียนเสริมนี้ เราจะศึกษาทฤษฎีและแนวทางปฏิบัติในการจัดทำช่องทางการเข้าถึงเซิร์ฟเวอร์หลังบ้านอย่างปลอดภัย (Private VPN) ควบคู่กับระบบควบคุมชื่อโดเมนและตัวกรองโฆษณาในระดับเครือข่าย (DNS Sinkhole) เพื่อบูรณาการระบบ IoT Hub ให้มีความปลอดภัยและความสะดวกสูงสุดในการใช้งานจริง</p>
+
+    <div class="card">
+        <h2>Part 1: ทฤษฎีแนวคิดเครือข่าย และการวิเคราะห์ทรัพยากรระบบ</h2>
+        
+        <h3>1. ความเข้าใจด้านเทคโนโลยี VPN (Virtual Private Network)</h3>
+        <p>การเชื่อมต่อเข้าหาเซิร์ฟเวอร์ IoT Hub นอกบ้านโดยทั่วไปมีสองรูปแบบหลัก:</p>
+        <ul>
+            <li><strong>Client-Server VPN (เช่น PiVPN):</strong> อุปกรณ์ปลายทาง (Client) จะวิ่งเชื่อมต่อเข้าหาเกตเวย์ตัวกลาง (Server) ที่ตั้งอยู่ที่บ้านโดยตรง รูปแบบนี้จำเป็นต้องทำ <strong>Port Forwarding</strong> บนเราเตอร์บ้านเพื่อเปิดประตูให้ทราฟฟิกภายนอกเข้ามาได้</li>
+            <li><strong>Peer-to-Peer Mesh VPN (เช่น Tailscale):</strong> อุปกรณ์ทุกตัวเชื่อมต่อถึงกันเป็นใยแมงมุม (Mesh Network) โดยมีตัวกลางคอยช่วยทำ <strong>NAT Traversal</strong> ข้ามผ่านไฟร์วอลล์ของเราเตอร์โดยตรง ทำให้ไม่ต้องเปิดพอร์ตใดๆ บนเราเตอร์</li>
+        </ul>
+
+        <h3>2. การทำงานของ DNS Sinkhole (Pi-hole)</h3>
+        <p>เมื่ออุปกรณ์ใดๆ พยายามเข้าถึงเว็บไซต์ เครื่องจะส่งคำถามไปที่ DNS Server ก่อนเสมอ <strong>Pi-hole</strong> จะคอยทำหน้าที่เป็นผู้ตอบคำถาม DNS โดยเปรียบเทียบชื่อโฮสต์กับบัญชีดำ (Blocklists) หากพบว่าเป็นโฮสต์โฆษณาหรือตัวติดตาม Pi-hole จะส่งค่าไอพีปลายทางที่ไม่มีอยู่จริง (0.0.0.0 หรือ Sinkhole) กลับไป ทำให้เครื่อง Client ไม่สามารถดาวน์โหลดโฆษณาเหล่านั้นได้ ช่วยประหยัดแบนด์วิธและป้องกันภัยคุกคามในระดับเครือข่าย</p>
+
+        <div class="highlight-box">
+            <strong>⚠️ คำแจ้งเตือนและการวิเคราะห์ทรัพยากร (Resource Constraints):</strong>
+            <p>บอร์ด <strong>Raspberry Pi Zero 2 W</strong> มีหน่วยความจำจำกัดเพียง <strong>512MB RAM</strong> การเปิดรันโมดูลต่างๆ พร้อมกันทั้งหมดในระบบ (Mosquitto + FastAPI + SQLite + Tailscale + Pi-hole + PiVPN) อาจเกิดปัญหา <strong>Out of Memory (OOM)</strong> จนเครื่องค้างได้ง่าย สถิติการกินทรัพยากรปกติมีดังนี้:</p>
+            <ul>
+                <li><strong>Mosquitto Broker:</strong> ~10MB RAM</li>
+                <li><strong>FastAPI & SQLite (WAL Mode):</strong> ~50MB - 80MB RAM</li>
+                <li><strong>Tailscale Daemon:</strong> ~30MB - 50MB RAM</li>
+                <li><strong>WireGuard VPN (Kernel Space):</strong> ~15MB RAM (กินแรมและ CPU ต่ำมาก)</li>
+                <li><strong>OpenVPN (User Space):</strong> ~25MB - 40MB RAM (กิน CPU มากกว่า)</li>
+                <li><strong>Pi-hole (FTL Engine + Admin Web):</strong> ~60MB - 120MB+ RAM (ตามปริมาณคิวรีและขนาด Ad-lists)</li>
+            </ul>
+            <p><strong>คำแนะนำระดับปฏิบัติ (Best Practices):</strong> หากต้องการเปิดรันบริการเครือข่ายขนาดใหญ่เหล่านี้ทั้งหมดร่วมกัน แนะนำให้เปลี่ยนมาใช้งานบอร์ดที่มีแรมสูงขึ้น เช่น <strong>Raspberry Pi 4 (2GB/4GB/8GB)</strong> หรือ <strong>Raspberry Pi 5 (4GB/8GB)</strong> หรือติดตั้งลงบนระบบปฏิบัติการ <strong>Ubuntu Desktop/Server</strong> บนเครื่องคอมพิวเตอร์ทั่วไปได้โดยไม่มีข้อจำกัด</p>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Part 2: การติดตั้งแบบติดตั้งตรงบนระบบปฏิบัติการ (Bare-metal Installation)</h2>
+        <p>แนวทางการติดตั้งตรงบนระบบปฏิบัติการหลัก (Host OS) ช่วยลดความซับซ้อนเรื่องสิทธิ์เครือข่าย และช่วยให้เครื่องมือแต่ละตัวทำงานสอดประสานกันได้อย่างเป็นธรรมชาติตามมาตรฐาน</p>
+
+        <h3>1. ขั้นตอนการติดตั้ง Pi-hole (Bare-metal)</h3>
+        <p>รันคำสั่งสคริปต์อัตโนมัติของโครงการทางการ:</p>
+        <pre><code>curl -sSL https://install.pi-hole.net | bash</code></pre>
+        <p>ทำตามขั้นตอนบนหน้าจอสีน้ำเงินเพื่อตั้งค่า Static IP และอินเตอร์เฟสหลัก เช่น <code>eth0</code> (หากใช้สาย LAN) หรือ <code>wlan0</code> (หากใช้ Wi-Fi) เมื่อเสร็จสิ้นระบบจะแสดงรหัสผ่านผู้ดูแลสำหรับล็อกอินทางหน้าเว็บควบคุม</p>
+
+        <h3>2. ขั้นตอนการติดตั้ง PiVPN (Bare-metal)</h3>
+        <p>รันตัวติดตั้งของ PiVPN ซึ่งจะช่วยจัดตั้งเซิร์ฟเวอร์ WireGuard หรือ OpenVPN ให้อย่างรวดเร็ว:</p>
+        <pre><code>curl -L https://install.pivpn.io | bash</code></pre>
+        <p><strong>ข้อแนะนำการจูนความปลอดภัยและการบูรณาการ DNS:</strong></p>
+        <ol>
+            <li>ในขั้นตอนเลือกโปรโตคอล แนะนำให้เลือก <strong>WireGuard</strong> เนื่องจากทำงานได้เร็วกว่าและประหยัดทรัพยากรของบอร์ดอย่างมาก</li>
+            <li>ระหว่างการติดตั้ง ระบบจะตรวจสอบพบว่ามีบริการ <strong>Pi-hole</strong> รันอยู่บนเครื่อง และจะถามว่าต้องการใช้ Pi-hole เป็นตัวบริการ DNS หลักให้กับ Client ที่ต่อเข้ามาหรือไม่ ให้ตอบตกลง (Yes)</li>
+            <li>ตั้งค่าการส่งผ่านพอร์ต (Port Forwarding) บนเราเตอร์ของคุณให้ตรงกับพอร์ตของ WireGuard (พอร์ตมาตรฐานคือ <code>UDP 51820</code>) ชี้มาที่ IP ของบอร์ด Raspberry Pi</li>
+        </ol>
+
+        <h3>3. การจัดการสิทธิ์และการเชื่อมต่อ Client</h3>
+        <p>ใช้คำสั่งใน Terminal ในการเพิ่มโปรไฟล์ผู้ใช้และเชื่อมต่อผ่านสมาร์ทโฟน:</p>
+        <pre><code># สร้างโปรไฟล์สำหรับผู้ใช้งานใหม่
+pivpn add
+
+# แสดงรหัส QR Code บนหน้าจอ เพื่อใช้แอป WireGuard บนมือถือสแกนเชื่อมต่อ
+pivpn -qr</code></pre>
+        <p><em>ด้วยสถาปัตยกรรมนี้ โทรศัพท์มือถือที่อยู่นอกบ้านจะเสมือนนั่งอยู่ในบ้าน ได้รับการบล็อกโฆษณาจาก Pi-hole และสามารถพิมพ์เข้าหาหน้าแดชบอร์ดด้วยชื่อโดเมนภายในบ้าน (เช่น <code>iothub.local</code>) ได้โดยตรง</em></p>
+    </div>
+
+    <div class="card">
+        <h2>Part 3: ทางเลือกการรัน Pi-hole บน Docker และการแก้ปัญหาพอร์ต 53 ชน</h2>
+        <p>กรณีที่ต้องการเก็บบอร์ดของท่านให้สะอาด และรันทุกอย่างภายใต้ Docker Compose เราก็สามารถคอนเทนเนอร์ไรซ์ Pi-hole ได้เช่นเดียวกัน</p>
+
+        <h3>1. โครงสร้าง Docker Compose สำหรับ Pi-hole</h3>
+        <pre><code>version: "3"
+services:
+  pihole:
+    container_name: pihole
+    image: pihole/pihole:latest
+    ports:
+      - "53:53/tcp"
+      - "53:53/udp"
+      - "80:80/tcp"  # พอร์ตแอดมินเพจ (อาจเปลี่ยนเป็น 8080 หาก 80 ชนกับ FastAPI)
+    environment:
+      TZ: 'Asia/Bangkok'
+      WEBPASSWORD: 'your_secure_password'
+    volumes:
+      - './etc-pihole:/etc/pihole'
+      - './etc-dnsmasq.d:/etc/dnsmasq.d'
+    cap_add:
+      - NET_ADMIN  # จำเป็นอย่างยิ่งสำหรับการจัดการสิทธิ์ควบคุมเส้นทางเครือข่าย
+    restart: unless-stopped</code></pre>
+
+        <div class="highlight-box">
+            <strong>🔧 การแก้ปัญหาพอร์ต 53 ชน (systemd-resolved Conflict):</strong>
+            <p>ในระบบปฏิบัติการ Ubuntu หรือ Raspberry Pi OS รุ่นใหม่ บริการเริ่มต้นของระบบชื่อ <code>systemd-resolved</code> จะรันและถือสิทธิ์พอร์ต <code>53</code> (Local DNS resolver) ไว้เสมอ ส่งผลให้การสั่งสตาร์ท Docker Pi-hole ล้มเหลว วิธีปิดกั้นและแก้ไขมีดังนี้:</p>
+            <ol>
+                <li>เปิดไฟล์คอนฟิกเพื่อแก้ไข: <code>sudo nano /etc/systemd/resolved.conf</code></li>
+                <li>แก้ไขหรือเพิ่มบรรทัดดังต่อไปนี้เพื่อปิดการทำงานในระดับ Stub:
+                    <pre><code>DNSStubListener=no</code></pre>
+                </li>
+                <li>สร้างลิงก์ไฟล์ DNS ชี้ไปที่เนมเซิร์ฟเวอร์ระบบโดยตรงเพื่อป้องกันเน็ตหลุด:
+                    <pre><code>sudo ln -sf /run/systemd/resolve/resolv.conf /etc/resolv.conf</code></pre>
+                </li>
+                <li>สั่งรีสตาร์ทบริการเพื่อใช้การตั้งค่าใหม่: <code>sudo systemctl restart systemd-resolved</code></li>
+                <li>หลังจากนี้จะสามารถรันคำสั่ง <code>docker compose up -d</code> เพื่อเปิดบริการ Pi-hole ได้โดยไม่พบข้อผิดพลาดเรื่อง Bind Port 53 ชนกัน</li>
+            </ol>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Part 4: การเข้าถึงระยะไกลด้วย Tailscale ร่วมกับ Pi-hole (Tailnet Integration)</h2>
+        <p>หากคุณไม่ต้องการเปิดพอร์ตเราเตอร์บ้านเลยแม้แต่พอร์ตเดียว (ป้องกันการสแกนภายนอก 100%) การใช้ <strong>Tailscale P2P VPN</strong> ควบคู่กับ Pi-hole คือคำตอบที่เป็นมาตรฐานสูงสุด</p>
+
+        <h3>1. ขั้นตอนปฏิบัติบนอุปกรณ์</h3>
+        <p>ติดตั้งและเชื่อมต่อบอร์ด Raspberry Pi เข้าสู่ Tailnet ส่วนตัว:</p>
+        <pre><code>curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up</code></pre>
+        <p>ระบบจะสร้าง IP ประจำตัวให้บอร์ดในวงเครือข่าย Tailscale (เช่น <code>100.115.x.y</code>)</p>
+
+        <h3>2. การตั้งค่าผ่านหน้าเว็บควบคุมของ Tailscale (Admin Console)</h3>
+        <p>เพื่อให้ทุกอุปกรณ์ที่ติดตั้ง Tailscale ค้นหา DNS และบล็อกโฆษณาผ่าน Pi-hole อัตโนมัติ:</p>
+        <ol>
+            <li>เข้าไปที่หน้าแดชบอร์ดบริการ <a href="https://login.tailscale.com/admin/dns" target="_blank">Tailscale Admin Console</a></li>
+            <li>ในแถบเมนู <strong>DNS</strong> เลื่อนลงไปที่ <strong>Nameservers</strong> กดเลือก <strong>Add nameserver</strong> แล้วคลิก <strong>Custom...</strong></li>
+            <li>ใส่ที่อยู่ IP ของเครื่อง Raspberry Pi ที่ได้มาจากระบบ Tailscale (ไอพีในวง 100.x.y.z) แล้วกดเซฟ</li>
+            <li>เปิดปุ่มสวิตช์ <strong>Override local DNS</strong> เพื่อบังคับใช้ทั่วทั้งเครือข่าย</li>
+        </ol>
+        <div class="highlight-box">
+            <strong>🔒 ความมั่นคงปลอดภัยระดับสูง:</strong> วิธีนี้จะทำให้ทราฟฟิกข้อมูล DNS ของเราถูกเข้ารหัสและเชื่อมตรงเข้าหา Pi-hole จากทุกที่ในโลกได้อย่างสมบูรณ์ โดยไม่ต้องทำการเปิดพอร์ต 53 หรือพอร์ตใดๆ ออกสู่เครือข่ายอินเทอร์เน็ตสาธารณะเลย
+        </div>
+    </div>
+
+    <div class="quiz">
+        <h2>🧠 ตรวจสอบความเข้าใจ (Quick Quiz)</h2>
+        <p>หากนำเซิร์ฟเวอร์ VPN (PiVPN) และตัวกรอง DNS (Pi-hole) มาติดตั้งใช้งานบนบอร์ดที่มี RAM เพียง 512MB เช่น Raspberry Pi Zero 2 W ร่วมกับ FastAPI และระบบหลักอื่นๆ จะส่งผลกระทบและข้อจำกัดอย่างไร?</p>
+        <div class="quiz-option" data-correct="false" data-feedback="ไม่ถูกต้อง! อุปกรณ์ต่างๆ ยังคงทำงานได้ด้วยการส่งผ่านข้อมูลปกติแต่จะเจอปัญหาด้านหน่วยความจำ">A) ระบบจะปฏิเสธการเชื่อมต่อเครือข่ายและใช้งานไม่ได้ทันทีตั้งแต่ระดับบอร์ดแวร์</div>
+        <div class="quiz-option" data-correct="true" data-feedback="ถูกต้อง! แรม 512MB มีขนาดค่อนข้างเล็กสำหรับการรัน Docker, VPN, SQLite และคิวรีประมวลผลพร้อมกัน อาจทำให้เกิดสภาวะ Out of Memory (OOM) จนระบบค้างได้ง่าย การจูนระบบ ปิด Logging ที่ไม่จำเป็น หรืออัปเกรดเป็น Pi 4/5 หรือ Ubuntu Desktop/Server เป็นแนวทางปฏิบัติที่ดีที่สุด (Best Practices)">B) ตัวเครื่องอาจเจอปัญหาแรมเต็ม (Out of Memory) และทำงานค้างได้ง่าย ควรแก้ไขโดยปิดระบบ Logging หรือเปลี่ยนไปใช้บอร์ดรุ่นสูงกว่าที่มี RAM 2GB ขึ้นไป หรือใช้ Ubuntu PC</div>
+    </div>
+
+    <div class="citation">
+        <p>📖 <strong>ข้อมูลอ้างอิงและศึกษาเพิ่มเติม:</strong></p>
+        <ul>
+            <li>เอกสารการใช้งานอย่างเป็นทางการของ PiVPN: <a href="https://www.pivpn.io/" target="_blank">PiVPN Official Website</a></li>
+            <li>แนวทางบูรณาการ DNS ร่วมกับ Pi-hole: <a href="https://docs.pivpn.io/faq/#how-do-i-use-pi-hole-with-pivpn" target="_blank">PiVPN & Pi-hole Integration Guide</a></li>
+            <li>การเชื่อมต่อ DNS ร่วมกับ Tailscale: <a href="https://tailscale.com/kb/1114/pi-hole" target="_blank">Tailscale KB: Using Pi-hole with Tailscale</a></li>
+            <li>การแก้ปัญหาพอร์ต DNS 53 ชนกันในระบบ Linux: <a href="https://docs.pi-hole.net/main/prerequisites/#freeing-port-53" target="_blank">Pi-hole Official Docs: Freeing Port 53 (systemd-resolved)</a></li>
+        </ul>
+        <p>💡 <em>ลิงก์บทเรียนย้อนหลัง: <a href="./0009-microcontroller-esp32-platformio.html">บทเรียนที่ 9: พัฒนาเฟิร์มแวร์ ESP32</a></em></p>
+    </div>
+    <script src="../main.js"></script>
+</body>
+</html>

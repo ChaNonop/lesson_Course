@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lesson 9: การพัฒนาเฟิร์มแวร์ ESP32/ESP8266 แบบไร้รอยต่อ</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <h1>บทเรียนที่ 9: การพัฒนาเฟิร์มแวร์ ESP32/ESP8266 แบบไร้รอยต่อ</h1>
+    <p>ในบทเรียนสุดท้ายนี้ เราจะเปลี่ยนการจัดระเบียบโค้ดฮาร์ดแวร์มาสู่ระดับมือโปร นำความรู้เรื่องคลาสและสืบทอด (OOP) มาสลับควบคุมดึงค่าเซ็นเซอร์จริง เรียนรู้ระบบการซ่อนรหัสผ่านให้ปลอดภัย และการสั่งทดสอบไฟกระพริบแบบไม่หน่วงบอร์ดเชื่อมโยงกับ Dashboard</p>
+
+    <div class="card">
+        <h2>Part 1: secrets.h & .gitignore (การเก็บข้อมูลความลับอย่างปลอดภัย)</h2>
+        <p>ปัญหาที่นักพัฒนาเกือบทุกคนเคยเจอคือการเผลออัปโหลดไฟล์ที่มี SSID, รหัสผ่าน Wi-Fi หรือรหัสผ่าน MQTT ขึ้น GitHub สาธารณะ เราแก้ไขปัญหานี้ได้โดยการแยกไฟล์เก็บค่าความลับ:</p>
+        
+        <p>1. สร้างไฟล์ชื่อ <code>include/secrets.h</code> ภายใต้โปรเจกต์ PlatformIO:</p>
+        <pre><code>#ifndef SECRETS_H
+#define SECRETS_H
+
+#define WIFI_SSID "ชื่อไวไฟของคุณ"
+#define WIFI_PASS "รหัสผ่านไวไฟของคุณ"
+#define MQTT_SERVER "192.168.1.100"  // IP ของ Raspberry Pi หรือเซิร์ฟเวอร์
+#define MQTT_PORT 1883
+#define MQTT_USER "esp_node"
+#define MQTT_PASS "รหัสผ่านที่ตั้งไว้ในโบรกเกอร์"
+
+#endif</code></pre>
+
+        <p>2. เพิ่มบรรทัดต่อไปนี้ลงในไฟล์ <code>.gitignore</code> ของระบบควบคุมเวอร์ชัน:</p>
+        <pre><code># ซ่อนรหัสผ่านและค่าความลับทั้งหมดของบอร์ด
+include/secrets.h</code></pre>
+        <p>เมื่อเราสั่ง Push โค้ดขึ้น Git ตัวสแกนจะเพิกเฉยต่อไฟล์ความลับนี้ ทำให้โปรเจกต์ของคุณปลอดภัย 100%</p>
+    </div>
+
+    <div class="card">
+        <h2>Part 2: PlatformIO Multi-Board Configuration</h2>
+        <p>ไฟล์ <code>platformio.ini</code> ของโปรเจกต์สามารถประกาศสภาพแวดล้อมรันเพื่อสลับอัปโหลดทั้งบอร์ด **ESP32** และ **ESP8266** ได้พร้อมกัน โดยการกำหนดค่าห้องสมุดไลบรารีที่จำเป็นแยกจากกัน:</p>
+        <pre><code>; [env:esp32dev] - สำหรับบอร์ด ESP32
+[env:esp32dev]
+platform = espressif32
+board = esp32dev
+framework = arduino
+monitor_speed = 115200
+lib_deps =
+    knolleary/PubSubClient @ ^2.8
+    bblanchon/ArduinoJson @ ^6.21.3
+    adafruit/DHT sensor library @ ^1.4.4
+    adafruit/Adafruit Unified Sensor @ ^1.1.9
+
+; [env:nodemcuv2] - สำหรับบอร์ด ESP8266 (NodeMCU)
+[env:nodemcuv2]
+platform = espressif8266
+board = nodemcuv2
+framework = arduino
+monitor_speed = 115200
+lib_deps =
+    knolleary/PubSubClient @ ^2.8
+    bblanchon/ArduinoJson @ ^6.21.3</code></pre>
+    </div>
+
+    <div class="card">
+        <h2>Part 3: C++ OOP Sensor Inheritance (สืบทอดและพหุสัณฐานเซ็นเซอร์)</h2>
+        <p>เพื่อให้เห็นการทำงานจริงของการสืบทอด (Inheritance) และการพหุสัณฐาน (Polymorphism) บนฮาร์ดแวร์ เราสร้างคลาสแม่ควบคุมเซ็นเซอร์ทั่วไป และคลาสลูกสำหรับการอ่านค่าจริง:</p>
+        
+        <pre><code>#include &lt;Arduino.h&gt;
+
+// 1. คลาสแม่ (Abstract Class)
+class SensorReader {
+protected:
+    String sensorName;
+    int pin;
+public:
+    SensorReader(String name, int p) : sensorName(name), pin(p) {}
+    virtual void setup() = 0;        // Pure Virtual Function
+    virtual float readValue() = 0;   // Pure Virtual Function
+    
+    String getName() { return sensorName; }
+};
+
+// 2. คลาสลูกสำหรับ ESP32: อ่านค่าจาก DHT11 จริง
+#ifdef ESP32
+#include &lt;DHT.h&gt;
+class DHTSensorReader : public SensorReader {
+private:
+    DHT dht;
+    bool isTemperature;
+public:
+    DHTSensorReader(String name, int p, int dhtType, bool isTemp) 
+        : SensorReader(name, p), dht(p, dhtType), isTemperature(isTemp) {}
+        
+    void setup() override {
+        dht.begin();
+    }
+    
+    float readValue() override {
+        if (isTemperature) {
+            float t = dht.readTemperature();
+            return isnan(t) ? -99.0 : t; // ส่งค่า -99.0 หากอ่านค่าไม่สำเร็จ
+        } else {
+            float h = dht.readHumidity();
+            return isnan(h) ? -99.0 : h;
+        }
+    }
+};
+#endif
+
+// 3. คลาสลูกสำหรับ ESP8266: อ่านค่าแอนะล็อก A0 (สุ่มค่าทดสอบเมื่อตรวจจับสัญญาณไม่ได้)
+class AnalogSensorReader : public SensorReader {
+public:
+    AnalogSensorReader(String name, int p) : SensorReader(name, p) {}
+    
+    void setup() override {
+        pinMode(pin, INPUT);
+    }
+    
+    float readValue() override {
+        int rawVal = analogRead(pin);
+        // หากไม่มีอุปกรณ์ต่อเชื่อมจริงๆ ให้สุ่มค่าจำลองเพื่อนวัตกรรม
+        if (rawVal == 0 || rawVal == 1024) {
+            return (float)random(300, 800) / 10.0;
+        }
+        return (float)rawVal;
+    }
+};
+
+// 4. การประยุกต์ใช้งาน Polymorphism ในฟังก์ชันหลัก (main.cpp)
+SensorReader* sensor = nullptr;
+
+void setup() {
+    Serial.begin(115200);
+    
+    #ifdef ESP32
+    // สร้างออบเจกต์ DHT11 ของ ESP32 ผ่านตัวชี้ของคลาสแม่ (Polymorphism)
+    sensor = new DHTSensorReader("esp32_temp", 4, 11, true); // พิน 4, DHT11, อ่านค่า Temp
+    #else
+    // สร้างออบเจกต์ Analog บน ESP8266
+    sensor = new AnalogSensorReader("esp8266_analog", A0);
+    #endif
+
+    sensor->setup(); // เรียกใช้ Virtual Method ที่ถูก Override
+}
+
+void loop() {
+    float value = sensor->readValue();
+    Serial.print("Sensor Name: ");
+    Serial.print(sensor->getName());
+    Serial.print(" | Value: ");
+    Serial.println(value);
+    
+    delay(5000); // ดีเลย์หลัก 5 วินาที
+}
+</code></pre>
+    </div>
+
+    <div class="card">
+        <h2>Part 4: Non-blocking LED Blinking (สั่งไฟกระพริบโดยไม่ขัดจังหวะบอร์ด)</h2>
+        <p>เมื่อบอร์ด ESP32 ได้รับข้อความสั่งการ <code>"BLINK"</code> มาจากช่องข้อความ MQTT บอร์ดควรสั่งกระพริบ LED จำนวน 5 ครั้ง (สว่าง/ดับ สลับกันห่างกันครั้งละ 500ms) โดยใช้ตัวหน่วงเวลาอิงจาก <code>millis()</code> เพื่อให้ระบบหลักยังสามารถทำงานต่อและเชื่อมต่อเครือข่ายได้แบบไม่บล็อกการทำงาน (Non-blocking):</p>
+        
+        <pre><code>// กำหนดพินและตัวแปรควบคุม
+const int ledPin = 2; // พินไฟ LED ออนบอร์ด
+bool isBlinking = false;
+int stateCounter = 0;
+unsigned long previousBlinkTime = 0;
+const int blinkInterval = 500; // 500 มิลลิวินาที
+
+// ฟังก์ชันเริ่มจับจังหวะไฟกระพริบ
+void triggerBlinking() {
+    isBlinking = true;
+    stateCounter = 0;
+    previousBlinkTime = millis();
+}
+
+// ฟังก์ชันที่จะถูกเรียกใน loop() ตลอดเวลา
+void handleLedBlinking() {
+    if (!isBlinking) return;
+    
+    unsigned long currentMillis = millis();
+    if (currentMillis - previousBlinkTime >= blinkInterval) {
+        previousBlinkTime = currentMillis;
+        
+        // สลับสถานะไฟเปิด-ปิด (Toggle)
+        digitalWrite(ledPin, !digitalRead(ledPin));
+        
+        stateCounter++;
+        // กระพริบ 5 ครั้ง หมายถึงการสลับเปิดปิด 10 ครั้ง
+        if (stateCounter >= 10) {
+            digitalWrite(ledPin, LOW); // ปิดไฟสนิท
+            isBlinking = false;        // สิ้นสุดลำดับการกระพริบ
+        }
+    }
+}
+
+// MQTT Callback ฟังก์ชันเมื่อได้รับคำสั่งเข้ามา
+void callback(char* topic, byte* payload, unsigned int length) {
+    String msg = "";
+    for (int i = 0; i < length; i++) {
+        msg += (char)payload[i];
+    }
+    
+    if (msg == "BLINK") {
+        triggerBlinking(); // เรียกใช้ฟังก์ชันกระพริบไฟแบบไม่หน่วงเวลาหลัก
+    }
+}
+
+// 💡 อย่าลืมกำหนดโหมดพินของไฟ LED ในฟังก์ชัน setup()
+void setup() {
+    pinMode(ledPin, OUTPUT);
+    digitalWrite(ledPin, LOW); // ปิดไฟเริ่มต้น
+    // ... การตั้งค่าอื่นๆ
+}
+</code></pre>
+    </div>
+
+    <div class="card">
+        <h2>Part 5: การทดสอบระบบเชื่อมโยงและส่งข้อมูล (Integration Testing)</h2>
+        <p>หลังคอมไพล์โค้ดบอร์ด ESP32 (DHT11) และ ESP8266 (Analog) แล้วเสร็จ ให้ทำการทดสอบระบบบูรณาการร่วมกันตามขั้นตอนนี้:</p>
+        <ol>
+            <li><strong>เปิดระบบบริการ (Docker Compose):</strong> สั่งรัน Mosquitto Broker และ FastAPI ในเซิร์ฟเวอร์ Pi หรือคอมพิวเตอร์หลักของคุณด้วยคำสั่ง <code>docker compose up -d</code></li>
+            <li><strong>เปิดส่อง Logs ตรวจสอบ:</strong> สั่งรัน <code>docker compose logs -f backend</code> เพื่อดูว่า FastAPI ต่อเชื่อมกับ SQLite เรียบร้อยและเตรียมฟังสัญญาณ</li>
+            <li><strong>จ่ายไฟให้บอร์ดไมโคร:</strong> เชื่อมสาย USB หรือป้อนไฟฟ้าให้บอร์ด ส่องหน้าจอ Serial Monitor ใน VS Code (ด้วย Speed 115200) เพื่อยืนยันว่าบอร์ดต่อเชื่อม Wi-Fi และแสดงประโยค <code>"Connected to MQTT Broker!"</code></li>
+            <li><strong>ตรวจสอบฐานข้อมูล SQLite:</strong> เปิดดูหน้าตารางแดชบอร์ดประวัติในเบราว์เซอร์ของคุณ ยืนยันว่ามีแถวบันทึกข้อมูลเวลาส่งจาก <code>esp32_temp</code>, <code>esp32_humidity</code> และ <code>esp8266_analog</code> ไหลเข้ามาเป็นระยะ</li>
+            <li><strong>ทดสอบสั่งงานทางไกล (Remote Action):</strong> กดปุ่ม <strong>"Blink LED"</strong> บนแดชบอร์ดหน้าเว็บ สังเกตการแสดงผลทางกายภาพที่ตัวบอร์ด ESP32 ไฟ LED ออนบอร์ดจะต้องเปิดและปิดกระพริบสลับกัน 5 ครั้งอย่างชัดเจน โดยที่ไม่มีข้อมูลเซ็นเซอร์อื่นๆ หล่นหายหรือขาดช่วง</li>
+        </ol>
+    </div>
+
+    <div class="quiz">
+        <h2>🧠 ตรวจสอบความเข้าใจ (Quick Quiz)</h2>
+        <p>ทำไมเราจึงเลือกใช้วิธีจับเวลาด้วย <code>millis()</code> แทนการใช้คำสั่ง <code>delay(500)</code> เมื่อต้องการสั่งให้ไฟ LED กระพริบในขณะที่บอร์ดรันโปรแกรมระบบเชื่อมต่อ MQTT?</p>
+        <div class="quiz-option" data-correct="false" data-feedback="ไม่จริง! คอนโทรลเลอร์รุ่นนี้ประหยัดพลังงานได้เมื่อบอร์ดเข้าโหมดหลับลึก ซึ่งคำสั่ง delay() ไม่เกี่ยวข้อง">A) เพื่อประหยัดการใช้กระแสไฟฟ้าของบอร์ดไมโครคอนโทรลเลอร์</div>
+        <div class="quiz-option" data-correct="true" data-feedback="ถูกต้อง! คำสั่ง delay() เป็นคำสั่งบล็อกการประมวลผลของ CPU ส่งผลให้ฟังก์ชันรักษาการเชื่อมต่อ client.loop() หยุดทำงานชั่วคราวและทำให้โบรกเกอร์ตัดสิทธิ์เชื่อมต่อ การใช้ millis() ช่วยรักษาระบบหลักให้วิ่งได้ต่อเนื่องไม่สะดุด">B) เพื่อป้องกันไม่ให้ CPU บล็อกการประมวลผล ซึ่งจะทำให้โปรเซสเชื่อมโยง MQTT (client.loop) หยุดทำงานจนบอร์ดหลุดสายเชื่อมต่อ</div>
+    </div>
+
+    <div class="citation">
+        <p>📖 <strong>ข้อมูลอ้างอิงและศึกษาเพิ่มเติม:</strong></p>
+        <ul>
+            <li>การติดตั้งบอร์ด ESP8266 บน PlatformIO: <a href="https://docs.platformio.org/en/latest/platforms/espressif8266.html" target="_blank">PlatformIO ESP8266 Platform</a></li>
+            <li>ศึกษาหลักการ Non-blocking ด้วย Blink Without Delay: <a href="https://www.arduino.cc/en/Tutorial/BuiltInExamples/BlinkWithoutDelay" target="_blank">Arduino Reference Guide</a></li>
+        </ul>
+        <p>💡 <em>ลิงก์บทเรียนย้อนหลัง: <a href="./0008-oop-cpp-python.html">บทเรียนที่ 8: พื้นฐาน OOP และ 4 เสาหลัก</a></em></p>
+    </div>
+    <script src="../main.js"></script>
+</body>
+</html>

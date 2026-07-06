@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lesson 2: การควบคุม Terminal, tmux และติดตั้ง MQTT Broker</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <h1>บทเรียนที่ 2: การควบคุม Terminal, tmux และติดตั้ง MQTT Broker</h1>
+    <p>ในบทเรียนนี้ เราจะเจาะลึกการควบคุมเซิร์ฟเวอร์แบบ Command Line (CLI), การรักษาสถานะเซสชันด้วย tmux และกระบวนการติดตั้งและล็อกระบบความปลอดภัยของ MQTT Broker (Mosquitto)</p>
+
+    <div class="card">
+        <h2>Part 1: Linux Terminal & Journalctl Monitoring</h2>
+        <p>การเป็นผู้พัฒนา IoT Hub จำเป็นต้องคุ้นเคยกับคำสั่ง CLI พื้นฐานเพื่อสอดส่องและดูแลระบบปฏิบัติการ Debian/Ubuntu บน Raspberry Pi:</p>
+        <ul>
+            <li><code>top</code> หรือ <code>htop</code>: ใช้ตรวจสอบการทำงานของ CPU และดูปริมาณการใช้ RAM ที่เหลืออยู่บนบอร์ด</li>
+            <li><code>df -h</code>: ตรวจสอบความจุและการใช้งานดิสก์ (SD Card) เพื่อตรวจจับกรณี log หรือฐานข้อมูลโตจนเต็มดิสก์</li>
+            <li><code>journalctl -u mosquitto.service -n 50 -f</code>: แสดงบันทึกเหตุการณ์ (Logs) ล่าสุด 50 บรรทัด และกดติดตามแบบเรียลไทม์ (Follow) เพื่อส่องข้อผิดพลาดของการเชื่อมต่อ MQTT</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>Part 2: tmux Session & Pane Control (Basic Usage)</h2>
+        <p>ปัญหาหลักเมื่อเชื่อมต่อ SSH เข้าไปยังบอร์ดคอมพิวเตอร์ระยะไกลคือ หากหน้าต่าง SSH หลุดหรือเน็ตเวิร์กที่บ้านดับ โปรแกรมหรืองานรันเซิร์ฟเวอร์ที่ทำทิ้งไว้จะตายไปทันที เราแก้ปัญหานี้ด้วย <strong>tmux (Terminal Multiplexer)</strong> ซึ่งเป็นเครื่องมือช่วยจำลองเซสชันหน้าจอดำรันค้างไว้เบื้องหลัง แม้เราจะตัดการเชื่อมต่อออกไป:</p>
+        
+        <p><strong>1. การติดตั้ง tmux:</strong></p>
+        <pre><code>sudo apt update && sudo apt install -y tmux</code></pre>
+        
+        <p><strong>2. การจัดการ Session หลัก (การเข้า-ออก):</strong></p>
+        <ul>
+            <li><strong>สร้างเซสชันใหม่:</strong> รันคำสั่ง <code>tmux new -s iothub</code> (สร้างและเชื่อมเข้าไปในห้องทำงานชื่อ <code>iothub</code>)</li>
+            <li><strong>ถอยออกมา (Detach):</strong> กดปุ่ม <code>Ctrl+B</code> จากนั้นปล่อยนิ้วแล้วกดปุ่ม <code>D</code> เพื่อถอยกลับไปหน้าหลัก (โปรเซสข้างในจะยังรันต่อเนื่องเป็น Background)</li>
+            <li><strong>เชื่อมกลับเข้าห้องเดิม (Attach):</strong> รันคำสั่ง <code>tmux attach -t iothub</code></li>
+        </ul>
+
+        <p><strong>3. การจัดการช่องหน้าจอ (Split Panes):</strong></p>
+        <p>ภายใน tmux เราสามารถซอยหน้าจอเป็นหลาย ๆ บล็อกย่อย เพื่อส่อง Log ฝั่งหนึ่ง และรันคำสั่งรันเซิร์ฟเวอร์อีกฝั่งหนึ่งได้พร้อมกัน:</p>
+        <ul>
+            <li><strong>แบ่งหน้าจอ บน-ล่าง (Split Horizontally):</strong> กดปุ่ม <code>Ctrl+B</code> จากนั้นปล่อยนิ้วแล้วกดปุ่ม <code>"</code> (อัญประกาศคู่)</li>
+            <li><strong>แบ่งหน้าจอ ซ้าย-ขวา (Split Vertically):</strong> กดปุ่ม <code>Ctrl+B</code> จากนั้นปล่อยนิ้วแล้วกดปุ่ม <code>%</code> (เปอร์เซ็นต์)</li>
+            <li><strong>สลับบล็อกการทำงาน (Navigate):</strong> กดปุ่ม <code>Ctrl+B</code> จากนั้นปล่อยนิ้วแล้วกด <strong>ปุ่มลูกศร (Arrow Keys)</strong> ชี้ไปทางช่องที่ต้องการย้ายเคอร์เซอร์</li>
+            <li><strong>ออกจากบล็อกย่อย (Exit Pane):</strong> พิมพ์คำสั่ง <code>exit</code> หรือกดคีย์ลัด <code>Ctrl+D</code> ภายในช่องนั้นเพื่อลบช่องดังกล่าวทิ้ง</li>
+            <li><strong>ออกจาก tmux ถาวร:</strong> ปิดช่องย่อย (Panes) ทั้งหมดทีละช่อง หรือพิมพ์คำสั่ง <code>exit</code> ในช่องสุดท้าย เซสชัน tmux จะถูกทำลายลงอย่างสมบูรณ์</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>Part 3: Mosquitto Installation (Apt vs Docker)</h2>
+        <p>เราสามารถติดตั้ง MQTT Broker (Mosquitto) ได้ 2 วิธีหลัก ขึ้นอยู่กับกลยุทธ์การบริหารจัดการระบบ:</p>
+        
+        <h3>วิธีที่ 1: ติดตั้งผ่าน apt (Native install)</h3>
+        <pre><code>sudo apt update
+sudo apt install -y mosquitto mosquitto-clients
+sudo systemctl enable mosquitto
+sudo systemctl start mosquitto</code></pre>
+        
+        <h3>วิธีที่ 2: ติดตั้งผ่าน Docker Container (แยกส่วนระบบแอป)</h3>
+        <p>ใช้คำสั่งสวมคอนเทนเนอร์เพื่อให้ง่ายต่อการจัดการและเคลื่อนย้ายไปรันบนเครื่องอื่นได้รวดเร็ว (สำหรับรายละเอียดคำสั่งและสถาปัตยกรรมของ Docker สามารถเรียนเพิ่มเติมได้ใน <strong><a href="./0003-docker-fundamentals.html">บทเรียนที่ 3: พื้นฐาน Docker</a></strong>):</p>
+        <pre><code>docker run -d --name mosquitto -p 1883:1883 -p 9001:9001 -v /mosquitto/config:/mosquitto/config eclipse-mosquitto</code></pre>
+    </div>
+
+    <div class="card">
+        <h2>Part 4: MQTT Security & Authentication</h2>
+        <p>การเปิดพอร์ตแบบไม่มีการยืนยันตัวตน (allow_anonymous true) ในสภาพแวดล้อมใช้งานจริงมีความเสี่ยงสูงมากที่จะโดนบุกรุก เราจึงสร้างระบบความปลอดภัยผ่าน Username/Password:</p>
+        <p>1. สร้างไฟล์รหัสผ่านของระบบและเพิ่มชื่อผู้ใช้ <code>esp_node</code>:</p>
+        <pre><code>sudo mosquitto_passwd -c /etc/mosquitto/passwd esp_node</code></pre>
+        <p><em>(พิมพ์ตั้งรหัสผ่านของคุณ จากนั้นกดยืนยัน)</em></p>
+        
+        <p>2. แก้ไขไฟล์คอนฟิกหลักเพื่อปิดการเชื่อมต่อภายนอกแบบไร้ตัวตน และชี้ไปยังไฟล์รหัสผ่าน:</p>
+        <pre><code>sudo nano /etc/mosquitto/conf.d/local.conf</code></pre>
+        <p>แก้ไขข้อมูลข้างในเป็น:</p>
+        <pre><code>listener 1883
+allow_anonymous false
+password_file /etc/mosquitto/passwd</code></pre>
+        
+        <p>3. รีสตาร์ท Broker เพื่ออัปเดตสิทธิ์ความปลอดภัย:</p>
+        <pre><code>sudo systemctl restart mosquitto</code></pre>
+
+        <p>4. ทดสอบความถูกต้องด้วยคำสั่ง Subscribe พร้อมส่งสิทธิ์ยืนยันตัวตน:</p>
+        <pre><code>mosquitto_sub -h localhost -t "sensors/#" -u "esp_node" -P "รหัสผ่านที่ตั้งไว้"</code></pre>
+    </div>
+
+    <div class="quiz">
+        <h2>🧠 ตรวจสอบความเข้าใจ (Quick Quiz)</h2>
+        <p>หากเราต้องการถอยออกจากเซสชัน tmux เพื่อไปทำงานอย่างอื่นในเครื่องต่อ แต่ต้องการให้โปรเซสที่รันอยู่ทำงานอยู่เบื้องหลังเหมือนเดิม (Background running) ต้องกดปุ่มใด?</p>
+        <div class="quiz-option" data-correct="false" data-feedback="ปุ่มนี้จะทำลายเชลล์ปัจจุบัน หรือปิดโปรแกรมทั้งหมดลง">A) Ctrl + C</div>
+        <div class="quiz-option" data-correct="true" data-feedback="ถูกต้อง! Ctrl+B แล้วตามด้วย D (Detach) คือคีย์ลัดสำหรับถอยออกจาก tmux session เพื่อกลับไปใช้งาน Terminal ปรกติ">B) กด Ctrl + B แล้วตามด้วย D</div>
+    </div>
+
+    <div class="citation">
+        <p>📖 <strong>ข้อมูลอ้างอิงและศึกษาเพิ่มเติม:</strong></p>
+        <ul>
+            <li>คู่มือคีย์ลัด tmux: <a href="https://github.com/tmux/tmux/wiki" target="_blank">tmux Official Wiki</a></li>
+            <li>คู่มือตั้งรหัสผ่าน Mosquitto: <a href="https://mosquitto.org/man/mosquitto_passwd-1.html" target="_blank">mosquitto_passwd Manual Page</a></li>
+        </ul>
+        <p>💡 <em>ลิงก์บทเรียนย้อนหลัง: <a href="./0001-architecture-overview.html">บทเรียนที่ 1: ภาพรวมสถาปัตยกรรม</a></em></p>
+    </div>
+    <script src="../main.js"></script>
+</body>
+</html>

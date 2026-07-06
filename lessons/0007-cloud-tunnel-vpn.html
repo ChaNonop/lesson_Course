@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lesson 7: รีโมทข้ามโครงข่ายด้วย Cloudflare Tunnel และ Tailscale</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <h1>บทเรียนที่ 7: รีโมทข้ามโครงข่ายด้วย Cloudflare Tunnel และ Tailscale</h1>
+    <p>ในบทนี้ เราจะเรียนรู้วิธีการเปิดเผยแดชบอร์ด IoT ของเราสู่โลกภายนอกอย่างปลอดภัยโดยไม่ต้องทำการฟอร์เวิร์ดพอร์ตด้วย Cloudflare Tunnel ควบคู่กับการควบคุมสิทธิ์ และเปิดช่องทางรีโมทหลังบ้านอย่างปลอดภัยด้วย VPN ส่วนตัวผ่าน Tailscale</p>
+
+    <div class="card">
+        <h2>Part 1: Cloudflare Tunnel (Secure Inbound Access)</h2>
+        <p>การปล่อยให้เซิร์ฟเวอร์ IoT Hub ต่อออกสู่ภายนอกด้วยวิธีการดั้งเดิมอย่าง Port Forwarding บนเราเตอร์มีความเสี่ยงสูงที่จะถูกสแกนพอร์ตหาช่องโหว่เพื่อโจมตี เราหลีกเลี่ยงพฤติกรรมนี้ด้วยการใช้ <strong>Cloudflare Tunnel</strong>:</p>
+        <p><strong>ข้อดีของ Cloudflare Tunnel:</strong></p>
+        <ul>
+            <li>ไม่ต้องขอ Public IP หรือคอยกังวลกับปัญหา Dynamic IP</li>
+            <li>ไม่ต้องเปิดพอร์ตใดๆ บนเราเตอร์ (Zero open ports) ตัวส่งสัญญาณจะยิงท่อ VPN ออกไปเชื่อมกับคลาวด์ของ Cloudflare เอง</li>
+            <li>มี SSL/HTTPS ฟรีอัตโนมัติ</li>
+        </ul>
+        
+        <p><strong>ขั้นตอนการติดตั้งเบื้องต้น:</strong></p>
+        <pre><code># 1. ดาวน์โหลดและติดตั้ง cloudflared
+curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm.deb
+sudo dpkg -i cloudflared.deb
+
+# 2. ทำการล็อกอินเข้าสิทธิ์บัญชี Cloudflare ของคุณ
+cloudflared tunnel login
+
+# 3. สร้างอุโมงค์ส่วนตัวใหม่ในระบบ
+cloudflared tunnel create my-iot-hub
+
+# 4. ตั้งค่าระบุปลายทางในไฟล์ config.yml ชี้ไปที่เซิร์ฟเวอร์ FastAPI พอร์ต 8000
+tunnel: my-iot-hub
+credentials-file: /home/pi/.cloudflared/my-iot-hub.json
+
+ingress:
+  - hostname: iothub.yourdomain.com
+    service: http://localhost:8000
+  - service: http_status:404</code></pre>
+        <div class="highlight-box">
+            <strong>🔒 การล็อกความปลอดภัย (Cloudflare Access):</strong> เราสามารถไปที่แดชบอร์ด Cloudflare Zero Trust เพื่อสร้างนโยบายป้องกันทางเข้า เช่น บังคับล็อกอินผ่านอีเมลผู้รับเพื่อรับรหัสผ่านครั้งเดียว (Email OTP) ก่อนเปิดแดชบอร์ด ป้องกันคนแปลกหน้าเข้าถึง
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Part 2: Tailscale VPN (Private Peer-to-Peer Mesh Network)</h2>
+        <p>ในกรณีที่เราไม่ต้องการเปิดแดชบอร์ดสู่สาธารณะ แต่ต้องการเข้ามาควบคุมเซิร์ฟเวอร์ ส่อง Log หรือควบคุมโค้ดในระยะไกลผ่าน SSH วิธีการติดตั้ง VPN ส่วนตัวที่ปลอดภัยที่สุดและติดตั้งง่ายคือ <strong>Tailscale</strong>:</p>
+        <p>Tailscale ใช้โปรโตคอล WireGuard ในการสร้างระบบ VPN แบบ Peer-to-Peer ช่วยให้อุปกรณ์ของคุณคุยกันเองได้ทันทีโดยไม่ต้องเปิดพอร์ตเราเตอร์</p>
+        
+        <p><strong>ขั้นตอนติดตั้งและเชื่อมต่อ:</strong></p>
+        <pre><code># 1. ติดตั้ง Tailscale บน Raspberry Pi
+curl -fsSL https://tailscale.com/install.sh | sh
+
+# 2. สั่งเปิดเครื่องและเข้าสู่ระบบเพื่อยืนยันตัวตน
+sudo tailscale up</code></pre>
+        <p>ระบบจะสร้างลิงก์สำหรับล็อกอินบนหน้าเบราว์เซอร์ เมื่อกดยืนยันตัวตน Raspberry Pi จะได้ IP ส่วนตัว (เช่น <code>100.x.y.z</code>) ซึ่งคุณสามารถรันโปรแกรมเชลรีโมทจากคอมพิวเตอร์นอกบ้านเข้าหา IP ดังกล่าวได้ทันที:</p>
+        <pre><code>ssh pi@100.x.y.z</code></pre>
+        <div class="highlight-box" style="background-color: rgba(232, 148, 74, 0.05); border-left-color: var(--accent-orange);">
+            <strong>💡 เนื้อหาขั้นสูงเพิ่มเติม:</strong> สำหรับผู้ที่ต้องการศึกษาการบูรณาการระบบ VPN เข้ากับตัวกรองโฆษณาในระดับ DNS (DNS Sinkhole - Pi-hole) และการสร้างเกตเวย์ VPN ส่วนตัวด้วย PiVPN สามารถศึกษาต่อได้ใน <a href="./0010-pivpn-pihole-setup.html" style="color: var(--accent-orange); border-bottom-color: var(--accent-orange);">บทเรียนที่ 10 (เนื้อหาเพิ่มเติม)</a> ที่ท้ายหลักสูตรครับ
+        </div>
+    </div>
+
+    <div class="quiz">
+        <h2>🧠 ตรวจสอบความเข้าใจ (Quick Quiz)</h2>
+        <p>หากเราต้องการทำหน้าที่ดูแลรักษาระบบ (Maintenance) เข้าไปอัปเดตโค้ด ปรับระบบหลังบ้านผ่าน SSH นอกบ้าน โดยไม่ต้องการแชร์ระบบนี้แก่สาธารณะ เทคโนโลยีใดเหมาะสมที่สุด?</p>
+        <div class="quiz-option" data-correct="false" data-feedback="ไม่เหมาะสม! Cloudflare Tunnel เหมาะกับผู้ใช้ปลายทางที่ต้องการ HTTPS หน้าบ้าน หรือเข้าถึงโดยใช้โดเมน">A) Cloudflare Tunnel แบบเปิด Public Subdomain</div>
+        <div class="quiz-option" data-correct="true" data-feedback="ถูกต้อง! Tailscale ช่วยสร้าง VPN ส่วนตัวเข้ารหัสข้ามเครือข่าย เพื่อให้สามารถ SSH เข้าหา Raspberry Pi ได้โดยตรงจากคอมพิวเตอร์ที่ติดตั้งสิทธิ์ตัวเดียวกันเท่านั้น">B) Tailscale VPN สำหรับการสร้างช่องทาง P2P VPN เข้ามายังเซิร์ฟเวอร์โดยตรง</div>
+    </div>
+
+    <div class="citation">
+        <p>📖 <strong>ข้อมูลอ้างอิงและศึกษาเพิ่มเติม:</strong></p>
+        <ul>
+            <li>เริ่มต้นใช้งาน Cloudflare Tunnel: <a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/" target="_blank">Cloudflare Tunnel docs</a></li>
+            <li>เริ่มต้นใช้งาน Tailscale: <a href="https://tailscale.com/kb/quick-start/" target="_blank">Tailscale Getting Started</a></li>
+        </ul>
+        <p>💡 <em>ลิงก์บทเรียนย้อนหลัง: <a href="./0006-responsive-dashboard.html">บทเรียนที่ 6: หน้าแดชบอร์ดตอบสนอง</a></em></p>
+    </div>
+    <script src="../main.js"></script>
+</body>
+</html>

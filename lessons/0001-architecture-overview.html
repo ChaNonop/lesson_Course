@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lesson 1: ภาพรวมสถาปัตยกรรม IoT Hub บน Raspberry Pi</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <h1>บทเรียนที่ 1: ภาพรวมสถาปัตยกรรม IoT Hub</h1>
+    <p>ยินดีต้อนรับสู่บทเรียนแรก! ในบทเรียนนี้เราจะทำความเข้าใจเกี่ยวกับหลักการของ IoT Hub ข้อเปรียบเทียบฮาร์ดแวร์ และโครงสร้างการจัดเก็บข้อมูล</p>
+
+    <div class="card">
+        <h2>Part 1: IoT Hub Concept & System Diagram</h2>
+        <p>หัวใจสำคัญของระบบ IoT Hub คือการผสานเทคโนโลยีระหว่างเซ็นเซอร์ปลายทาง โบรกเกอร์กระจายข่าวสาร เว็บเซิร์ฟเวอร์ ฐานข้อมูล และส่วนการแสดงผลแดชบอร์ดผ่านหน้าเว็บ โดยระบบทำงานประสานกันตามขั้นตอนดังนี้:</p>
+        
+        <div class="diagram">
+            <div class="node scattered-node">Microcontrollers<br><small>(ESP32 / ESP8266)</small></div>
+            <div class="arrow">➔ MQTT</div>
+            <div class="node scattered-node">MQTT Broker<br><small>(Mosquitto on Pi)</small></div>
+            <div class="arrow">➔ Sub</div>
+            <div class="node">FastAPI Backend<br><small>(Python on Pi)</small></div>
+            <div class="arrow">➔ SQL</div>
+            <div class="node">SQLite Database<br><small>(Local DB on Pi)</small></div>
+            <div class="arrow">⬌ HTTP</div>
+            <div class="node scattered-node">Web Dashboard<br><small>(Browser UI)</small></div>
+        </div>
+
+        <p><strong>รายละเอียดการประมวลผลทั้ง 5 ส่วน:</strong></p>
+        <ul>
+            <li><strong>Microcontrollers (ESP32/ESP8266):</strong> ทำหน้าที่ดึงข้อมูลจากฮาร์ดแวร์เซ็นเซอร์ภายนอก จากนั้นแพ็กเป็น JSON string และพับลิช (Publish) ไปยังโบรกเกอร์ผ่าน Wi-Fi</li>
+            <li><strong>MQTT Broker (Mosquitto):</strong> เป็นตัวกลางจัดการคิวข้อความแบบเบาบาง (Lightweight Pub/Sub) ไม่เก็บข้อมูลลงดิสก์ถาวร แต่เน้นความไวในการกระจายข้อมูล</li>
+            <li><strong>FastAPI (Backend Service):</strong> ทำหน้าที่เป็นไคลเอนต์จำลองรอรับข้อมูล (Subscribe) รันตลอดเวลาเพื่อดักรับคีย์ข้อมูลเซ็นเซอร์แล้วจัดเก็บลงฐานข้อมูล พร้อมทั้งให้บริการ API endpoints สำหรับดึงข้อมูลและส่งคำสั่งควบคุม</li>
+            <li><strong>SQLite Database:</strong> จัดเก็บข้อมูลทั้งหมดลงในไฟล์แบบถาวร เพื่อให้เซิร์ฟเวอร์สามารถเรียกข้อมูลสถิติย้อนหลังได้</li>
+            <li><strong>Web Dashboard (Browser UI):</strong> หน้าเว็บแอปพลิเคชันฝั่งผู้ใช้งาน (Client) ที่เชื่อมต่อเข้ากับ FastAPI Backend ผ่านโปรโตคอล HTTP เพื่อเรียกขอข้อมูลแบบเป็นระยะ (Polling) มาแสดงผลเป็นกราฟิกสวยงาม และส่งคำสั่งควบคุมย้อนกลับไปยังบอร์ดไมโครคอนโทรลเลอร์</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>Part 2: Platform Selection (Ubuntu Server vs Raspberry Pi OS)</h2>
+        <p>การเลือกใช้ระบบปฏิบัติการและบอร์ดคอมพิวเตอร์ขนาดเล็กในการทำ IoT Hub:</p>
+        <ul>
+            <li><strong>Raspberry Pi OS (Debian-based):</strong> ออกแบบมาเพื่อฮาร์ดแวร์ Raspberry Pi โดยเฉพาะ มีไดรเวอร์จัดการการใช้พลังงานและการคุมความร้อนที่ดีมาก เหมาะอย่างยิ่งสำหรับ Raspberry Pi Zero 2 W ที่มี RAM เพียง 512MB</li>
+            <li><strong>Ubuntu Server (Ubuntu-based):</strong> เหมาะสำหรับกรณีรันบนคอมพิวเตอร์ทั่วไป (x86) หรือ Mini PC ที่เปิดทิ้งไว้ มีแพ็คเกจซอฟต์แวร์เวอร์ชันค่อนข้างใหม่กว่า แต่ต้องการแรมในการเปิดระบบ (Base system) มากขึ้น</li>
+        </ul>
+        <div class="highlight-box">
+            <strong>💡 คำแนะนำระดับโปรดักชัน:</strong> หากระบบมีทรัพยากรน้อยกว่า 1GB RAM การติดตั้ง OS แบบปราศจาก GUI (Headless Server) จะช่วยคืนทรัพยากร CPU และ RAM ให้มาใช้งานฐานข้อมูลและเซิร์ฟเวอร์ได้อย่างเต็มที่
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Part 3: Data Memory Layout (Scattered Packet vs Contiguous DB Pages)</h2>
+        <p>เพื่อให้เข้าใจความแตกต่างของโมเดลข้อมูล เราแยกโมเดลการประมวลผลออกเป็น 2 ส่วนตามลักษณธการกระจายในหน่วยความจำ:</p>
+        <ul>
+            <li><strong>Scattered Packet (ฝั่งเครือข่าย/ไคลเอนต์):</strong> ข้อมูลที่วิ่งอยู่บน MQTT หรือ RAM ในบอร์ด ESP32 จะเป็นข้อมูลกระจัดกระจาย (Scattered) มีขนาดเล็ก วิ่งเป็นคีย์-ค่าสั้นๆ ผ่านเธรดการประมวลผลที่เน้นส่งเร็วและทำลายทิ้งทันที</li>
+            <li><strong>Contiguous DB Pages (ฝั่งฐานข้อมูล/ดิสก์):</strong> เมื่อข้อมูลมาถึง SQLite จะถูกจับมารวมและเรียงตัวต่อเนื่องลงบนหน้ากระดาษจำลอง (Pages) ขนาด 4KB ใน Harddrive/SD Card การเรียงตัวแบบเป็นระเบียบต่อเนื่อง (Contiguous) ช่วยให้สามารถสแกนสถิติช่วงเวลาย้อนหลัง (Query) ทำได้อย่างรวดเร็วมาก</li>
+        </ul>
+    </div>
+
+    <div class="quiz">
+        <h2>ตรวจสอบความเข้าใจ (Quick Quiz)</h2>
+        <p>เพราะเหตุใดข้อมูลในรูปแบบ Scattered (เช่น Payload MQTT ที่ส่งมาจาก ESP32) จึงไม่ควรนำมาเขียนลงในดิสก์ตรงๆ ทุกครั้งที่ส่งเข้ามาโดยไม่มีการตั้งค่าป้องกัน?</p>
+        <div class="quiz-option" data-correct="false" data-feedback="ผิด! ความเร็วเครือข่ายไม่ได้จำกัดความทนทานของดิสก์">A) เพราะเครือข่ายจะช้าลงอย่างมาก</div>
+        <div class="quiz-option" data-correct="true" data-feedback="ถูกต้อง! การเขียนข้อมูลกระจัดกระจายจำนวนมากทีละรายการลงการ์ดความจำ (SD Card) ตรงๆ จะทำให้เกิดการสึกหรอและหน้าการ์ดเสียเร็วขึ้นมาก เราจึงใช้ SQLite Engine ที่ช่วยจัดการรวมข้อมูลแล้วเขียนลงดิสก์แบบเป็นระบบบล็อก (Contiguous Pages)">B) เพราะการเขียนไฟล์ขนาดเล็กและไม่ต่อเนื่องถี่เกินไป จะทำให้ SD Card สึกหรอและพังเร็วขึ้น</div>
+    </div>
+
+    <div class="citation">
+        <p>📖 <strong>ข้อมูลอ้างอิงและศึกษาเพิ่มเติม:</strong></p>
+        <ul>
+            <li>ศึกษาความลึกของ SQLite Database Pages: <a href="https://www.sqlite.org/fileformat.html" target="_blank">SQLite File Format Specification</a></li>
+            <li>เลือก OS ให้เหมาะกับบอร์ด: <a href="https://www.raspberrypi.com/software/" target="_blank">Raspberry Pi Software Guide</a></li>
+        </ul>
+        <p>💡 <em>หากมีคำถามสงสัยเพิ่มเติม สามารถพิมพ์ถามในแชตเพื่อคุยกับผู้สอนต่อได้ทันที!</em></p>
+    </div>
+    <script src="../main.js"></script>
+</body>
+</html>

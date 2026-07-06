@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lesson 4: การจัดทำระบบ FastAPI และ SQLite</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <h1>บทเรียนที่ 4: การจัดทำระบบ FastAPI และ SQLite</h1>
+    <p>ในบทเรียนนี้ เราจะเริ่มต้นควบคุมสภาพแวดล้อมไพทอนด้วย venv, เรียนรู้การทำงานร่วมกับ SQLite ด้วยโหมดประสิทธิภาพสูงสุด (WAL Mode), ตรวจสอบข้อมูลก่อนเข้าสู่ DB ด้วย Pydantic, และปิดท้ายด้วยการควบคุมบริการผ่าน Docker-Compose</p>
+
+    <div class="card">
+        <h2>Part 1: Python Virtual Environment (venv)</h2>
+        <p>เพื่อหลีกเลี่ยงปัญหาเวอร์ชันของไลบรารีทับกันในระบบปฏิบัติการหลัก เราจะตั้งกล่องทรายแยกสำหรับการพัฒนาเว็บแอป:</p>
+        <p>1. ติดตั้ง venv (สำหรับบางระบบที่ยังไม่มี):</p>
+        <pre><code>sudo apt install -y python3-venv python3-pip</code></pre>
+        <p>2. สร้างกล่องทราย <code>venv</code> และเปิดใช้งาน:</p>
+        <pre><code>python3 -m venv venv
+source venv/bin/activate</code></pre>
+        <p>เมื่อสังเกตเห็นคำว่า <code>(venv)</code> ขึ้นที่ด้านหน้าของ Terminal หมายความว่าเครื่องทำงานบนสภาพแวดล้อมจำลองเรียบร้อยแล้ว</p>
+    </div>
+
+    <div class="card">
+        <h2>Part 2: SQLite Syntax & Performance Tuning (WAL Mode)</h2>
+        <p>SQLite เป็นฐานข้อมูลแบบไฟล์เดี่ยว มีปัญหาคลาสสิกคือเมื่อมีการอ่านข้อเขียน (Write) พร้อม ๆ กันจากหลายเอนทิตี (เช่น ESP32 กำลังเขียน และ FastAPI กำลังรับข้อมูลแล้วเขียน) จะขึ้นข้อผิดพลาด <code>database is locked</code> เราจะจูนระบบด้วย WAL Mode:</p>
+        <p><strong>WAL (Write-Ahead Logging) Mode:</strong> ช่วยให้ผู้อ่าน (Reader) สามารถอ่านค่าจากฐานข้อมูลได้ในขณะที่ผู้เขียน (Writer) กำลังเขียนข้อมูลลงหน้ากระดาษจำลองใหม่ในไฟล์ <code>.db-wal</code> ชั่วคราว ป้องกัน Database Locked ได้ 100%</p>
+        
+        <p>ตัวอย่างการเปิดใช้งาน WAL Mode ใน <code>database.py</code> ด้วย SQLAlchemy Engine:</p>
+        <pre><code>from sqlalchemy import create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+SQLALCHEMY_DATABASE_URL = "sqlite:///./sensor_data.db"
+
+# 💡 1. ตั้งค่า timeout ใน connect_args (Busy Timeout) เพื่อรอคิวก่อนยกเลิกข้อผิดพลาด
+# 💡 2. รันคำสั่ง PRAGMA journal_mode=WAL ทันทีที่เชื่อมต่อฐานข้อมูล
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL, 
+    connect_args={"check_same_thread": False, "timeout": 30} 
+)
+
+@event.listens_for(engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.close()
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()</code></pre>
+    </div>
+
+    <div class="card">
+        <h2>Part 2.5: Time-based SQL Queries (การเขียนคำสั่งดึงข้อมูลย้อนหลังตามเวลา)</h2>
+        <p>เมื่อต้องการนำเสนอประวัติข้อมูลย้อนหลังตามเวลาในแดชบอร์ด (เช่น 1 นาที, 15 นาที, 1 วัน หรือ 1 สัปดาห์ก่อนหน้า) เราจะเขียนคำสั่ง SQL คัดกรองข้อมูลโดยใช้ฟังก์ชันจัดการเวลาของ SQLite ดังนี้:</p>
+        <pre><code>-- 1. ดึงข้อมูลใน 1 นาทีล่าสุด
+SELECT * FROM sensor_readings 
+WHERE timestamp &gt;= datetime('now', '-1 minute') 
+ORDER BY timestamp DESC;
+
+-- 2. ดึงข้อมูลใน 15 นาทีล่าสุด
+SELECT * FROM sensor_readings 
+WHERE timestamp &gt;= datetime('now', '-15 minutes') 
+ORDER BY timestamp DESC;
+
+-- 3. ดึงข้อมูลใน 1 วันล่าสุด
+SELECT * FROM sensor_readings 
+WHERE timestamp &gt;= datetime('now', '-1 day') 
+ORDER BY timestamp DESC;
+
+-- 4. ดึงข้อมูลใน 1 สัปดาห์ล่าสุด
+SELECT * FROM sensor_readings 
+WHERE timestamp &gt;= datetime('now', '-7 days') 
+ORDER BY timestamp DESC;
+
+-- 5. ค้นหาค่าอุณหภูมิสูงสุดของวันนี้ (Max Temp of the Day)
+SELECT MAX(value) FROM sensor_readings 
+WHERE sensor_name = 'esp32_temp' 
+AND timestamp &gt;= datetime('now', 'start of day');</code></pre>
+    </div>
+
+    <div class="card">
+        <h2>Part 3: ORM & Pydantic Data Validation</h2>
+        <p>การใช้ Object Relational Mapping (ORM) ช่วยให้เราเขียนโปรแกรมไพทอนแทนการพิมพ์ดิบ SQL ควบคู่กับการควบคุมความสะอาดข้อมูลด้วย Pydantic:</p>
+        
+        <p><strong>1. models.py (SQLAlchemy ORM Model):</strong> กำหนดโครงสร้างตารางจริงในฐานข้อมูล</p>
+        <pre><code>from sqlalchemy import Column, Integer, String, Float, DateTime
+from datetime import datetime, timezone
+from database import Base
+
+class SensorReading(Base):
+    __tablename__ = "sensor_readings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sensor_name = Column(String, index=True)
+    value = Column(Float)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))</code></pre>
+
+        <p><strong>2. schemas.py (Pydantic Schema):</strong> ตรวจสอบว่าพารามิเตอร์ของ Request ถูกต้องตามชนิดข้อมูลและเงื่อนไขที่กำหนดหรือไม่ก่อนเซฟ</p>
+        <pre><code>from pydantic import BaseModel, Field
+
+class SensorReadingCreate(BaseModel):
+    sensor_name: str = Field(..., min_length=3, max_length=50, example="esp32_temp")
+    value: float = Field(..., ge=-50.0, le=100.0) # จำกัดอุณหภูมิให้อยู่ในกรอบที่เป็นไปได้</code></pre>
+    </div>
+
+    <div class="card">
+        <h2>Part 4: Docker & Docker Compose Orchestration</h2>
+        <p>เรามัดรวมเว็บเซิร์ฟเวอร์ FastAPI และ MQTT Broker (Mosquitto) ด้วย Docker Compose เพื่อความสะดวกในการสร้างระบบแบบ One-command deployment:</p>
+        
+        <p><strong>1. Dockerfile (สำหรับ backend/FastAPI):</strong></p>
+        <pre><code>FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]</code></pre>
+
+        <p><strong>2. docker-compose.yml:</strong></p>
+        <pre><code>version: '3.8'
+
+services:
+  mqtt:
+    image: eclipse-mosquitto:latest
+    container_name: mosquitto_broker
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+
+  backend:
+    build: ./backend
+    container_name: fastapi_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app # เมาท์เพื่อให้แก้ไขโค้ดได้เรียลไทม์
+    depends_on:
+      - mqtt</code></pre>
+    </div>
+
+    <div class="quiz">
+        <h2>🧠 ตรวจสอบความเข้าใจ (Quick Quiz)</h2>
+        <p>การสลับมาใช้ <code>journal_mode=WAL</code> ใน SQLite แก้ปัญหาหลักข้อใดในระบบ IoT Hub?</p>
+        <div class="quiz-option" data-correct="false" data-feedback="ไม่จริง! ขนาดข้อมูลไม่ได้เปลี่ยนแปลงไปอย่างรุนแรงเนื่องจากการสลับโหมด WAL">A) ช่วยประหยัดพื้นที่จัดเก็บข้อมูลบน SD Card ได้ 50%</div>
+        <div class="quiz-option" data-correct="true" data-feedback="ถูกต้อง! WAL Mode แก้ปัญหา Database Locked โดยแยกทรานแซกชันเขียนไปไว้ที่ไฟล์แยกชั่วคราว ทำให้ผู้อ่านและผู้เขียนทำงานแบบพร้อมๆ กันได้เป็นอิสระมากขึ้น">B) แก้ปัญหา 'database is locked' เมื่อเอนทิตีอื่นๆ พยายามเชื่อมต่อและเขียนข้อมูลลงระบบพร้อมกัน</div>
+    </div>
+
+    <div class="citation">
+        <p>📖 <strong>ข้อมูลอ้างอิงและศึกษาเพิ่มเติม:</strong></p>
+        <ul>
+            <li>ประสิทธิภาพ SQLite WAL: <a href="https://sqlite.org/wal.html" target="_blank">Write-Ahead Logging</a></li>
+            <li>คำแนะนำ Docker Compose: <a href="https://docs.docker.com/compose/" target="_blank">Docker Compose Docs</a></li>
+        </ul>
+        <p>💡 <em>บทเรียนถัดไป: <a href="./0005-fastapi-mqtt-subscriber.html">บทเรียนที่ 5: เชื่อมต่อ MQTT เข้ากับ FastAPI</a></em></p>
+    </div>
+    <script src="../main.js"></script>
+</body>
+</html>
