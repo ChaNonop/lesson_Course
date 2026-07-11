@@ -1,0 +1,17 @@
+# ========================================================================
+# Git Ignore Configuration for IoT Hub Project
+# ========================================================================
+
+# Ignore Agent Directories & Files
+.agents/skiils
+skills-lock.json
+
+# Ignore Agent Markdown Skill/Context Files at the root directory
+/CONTEXT.md
+/MISSION.md
+/NOTES.md
+/RESOURCES.md
+/README.md
+
+# General rule to prevent uploading any root-level markdown planning files
+/*.md

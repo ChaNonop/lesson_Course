@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reference: IoT Hub Cheat Sheet</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <h1>📋 IoT Hub Quick Reference & Cheat Sheet</h1>
+    <p>หน้านี้เป็นคู่มือสรุปคำสั่งตั้งค่าและโค้ดตัวอย่างแบบย่อ สำหรับนำไปเปิดดูย้อนหลังขณะใช้งานจริง เนื้อหาครอบคลุมทุกขั้นตอนตั้งแต่การควบคุม Terminal ไปจนถึงการเขียนเฟิร์มแวร์บอร์ด ESP32</p>
+
+    <!-- ==================== MQTT ==================== -->
+    <div class="card">
+        <h2>1. คำสั่งควบคุม MQTT Broker (Mosquitto)</h2>
+        <p><strong>การติดตั้งผ่าน apt:</strong></p>
+        <pre><code>sudo apt update && sudo apt install -y mosquitto mosquitto-clients
+sudo systemctl enable mosquitto
+sudo systemctl start mosquitto</code></pre>
+
+        <p><strong>การตั้งค่าไฟล์คอนฟิก (/etc/mosquitto/conf.d/local.conf):</strong></p>
+        <pre><code># แบบมี Authentication (แนะนำ)
+listener 1883
+allow_anonymous false
+password_file /etc/mosquitto/passwd
+
+# แบบไม่มี Auth (เฉพาะ LAN ที่ไว้วางใจ)
+listener 1883
+allow_anonymous true</code></pre>
+
+        <p><strong>การสร้างไฟล์รหัสผ่านและเพิ่มผู้ใช้:</strong></p>
+        <pre><code># สร้างไฟล์ passwd และเพิ่มผู้ใช้ esp_node
+sudo mosquitto_passwd -c /etc/mosquitto/passwd esp_node
+
+# เพิ่มผู้ใช้เพิ่มเติม (ไม่ต้องใช้ -c อีก)
+sudo mosquitto_passwd /etc/mosquitto/passwd backend_user</code></pre>
+
+        <p><strong>คำสั่งทดสอบ Pub/Sub พร้อม Authentication:</strong></p>
+        <pre><code># รับข้อมูล (Subscribe)
+mosquitto_sub -h localhost -t "sensors/#" -u "esp_node" -P "รหัสผ่าน"
+
+# ส่งข้อมูล (Publish)
+mosquitto_pub -h localhost -t "sensors/data" -m '{"sensor_name":"test","value":28.5}' -u "esp_node" -P "รหัสผ่าน"</code></pre>
+
+        <p><strong>คำสั่งจัดการ Service:</strong></p>
+        <pre><code>sudo systemctl start mosquitto
+sudo systemctl stop mosquitto
+sudo systemctl restart mosquitto
+sudo systemctl status mosquitto
+
+# ส่อง Log แบบเรียลไทม์
+journalctl -u mosquitto.service -n 50 -f</code></pre>
+    </div>
+
+    <!-- ==================== tmux ==================== -->
+    <div class="card">
+        <h2>2. การควบคุม tmux Session</h2>
+        <p><strong>คำสั่งพื้นฐาน:</strong></p>
+        <pre><code># สร้าง Session ใหม่ชื่อ iothub
+tmux new -s iothub
+
+# รายการ Session ที่มีอยู่
+tmux ls
+
+# กลับเข้า Session ที่มีอยู่
+tmux attach -t iothub
+
+# ลบ Session ทิ้ง
+tmux kill-session -t iothub</code></pre>
+
+        <p><strong>คีย์ลัดสำคัญ (กด Ctrl+B ก่อนเสมอ):</strong></p>
+        <pre><code>Ctrl+B → D           ถอยออก (Detach) — โปรเซสยังทำงานอยู่เบื้องหลัง
+Ctrl+B → %           แบ่งหน้าจอซ้าย-ขวา (Split vertical)
+Ctrl+B → "           แบ่งหน้าจอบน-ล่าง (Split horizontal)
+Ctrl+B → ปุ่มลูกศร    สลับบล็อก/ช่องหน้าจอ (Navigate between panes)
+exit หรือ Ctrl+D      ปิดหน้าต่างย่อย (Close active pane)
+Ctrl+B → C           สร้างหน้าต่างใหม่ (New window)
+Ctrl+B → [0-9]       สลับระหว่างหน้าต่างหลัก</code></pre>
+    </div>
+
+    <!-- ==================== FastAPI ==================== -->
+    <div class="card">
+        <h2>3. Backend FastAPI & SQLAlchemy</h2>
+        <p><strong>ติดตั้ง Library (ภายใน venv):</strong></p>
+        <pre><code>python3 -m venv venv
+source venv/bin/activate
+
+pip install fastapi uvicorn sqlalchemy paho-mqtt aiofiles pydantic</code></pre>
+
+        <p><strong>รันเซิร์ฟเวอร์:</strong></p>
+        <pre><code># รันแบบ Dev (--reload จะรีโหลดเมื่อแก้โค้ด)
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+# เปิดดู Swagger API Docs
+# http://[IP_Raspberry_Pi]:8000/docs</code></pre>
+
+        <p><strong>ตั้งค่า database.py พร้อม WAL Mode:</strong></p>
+        <pre><code>from sqlalchemy import create_engine, event
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+SQLALCHEMY_DATABASE_URL = "sqlite:///./sensor_data.db"
+
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"check_same_thread": False, "timeout": 30}
+)
+
+@event.listens_for(engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.close()
+
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()</code></pre>
+    </div>
+
+    <!-- ==================== SQLite ==================== -->
+    <div class="card">
+        <h2>4. SQLite Database Commands</h2>
+        <p><strong>เปิดและสืบค้นข้อมูลจาก Terminal:</strong></p>
+        <pre><code># เปิดไฟล์ฐานข้อมูล
+sqlite3 sensor_data.db
+
+# ดูตารางทั้งหมด
+.tables
+
+# ดูโครงสร้างตาราง
+.schema sensor_readings
+
+# ดึงข้อมูล 10 รายการล่าสุด
+SELECT * FROM sensor_readings ORDER BY id DESC LIMIT 10;
+
+# ออกจาก SQLite
+.exit</code></pre>
+
+        <p><strong>ตรวจสอบสถานะ WAL Mode:</strong></p>
+        <pre><code>PRAGMA journal_mode;
+-- ควรแสดงผล: wal</code></pre>
+    </div>
+
+    <!-- ==================== Docker ==================== -->
+    <div class="card">
+        <h2>5. Docker & Docker Compose</h2>
+        <p><strong>คำสั่งควบคุม Docker Compose:</strong></p>
+        <pre><code># สร้างและรัน Container ทั้งหมดเบื้องหลัง
+docker compose up -d
+
+# Build ใหม่หลังแก้โค้ด
+docker compose up -d --build
+
+# ส่อง Log แบบรวม
+docker compose logs -f
+
+# ส่อง Log เฉพาะ Service
+docker compose logs -f backend
+
+# ปิดและทำลาย Container
+docker compose down</code></pre>
+
+        <p><strong>โครงสร้าง docker-compose.yml:</strong></p>
+        <pre><code>version: '3.8'
+services:
+  mqtt:
+    image: eclipse-mosquitto:latest
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mqtt</code></pre>
+    </div>
+
+    <!-- ==================== Tunnel & VPN ==================== -->
+    <div class="card">
+        <h2>6. เครือข่ายภายนอก: Cloudflare Tunnel & Tailscale</h2>
+        <p><strong>Cloudflare Tunnel (เปิดเว็บให้คนภายนอกเข้าถึง):</strong></p>
+        <pre><code># ติดตั้ง cloudflared (Linux ARM สำหรับ Raspberry Pi)
+curl -L --output cloudflared.deb \
+  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm.deb
+sudo dpkg -i cloudflared.deb
+
+# ล็อกอินและสร้างอุโมงค์
+cloudflared tunnel login
+cloudflared tunnel create my-iot-hub
+cloudflared tunnel run my-iot-hub</code></pre>
+
+        <p><strong>Tailscale VPN (รีโมท SSH จากนอกบ้าน):</strong></p>
+        <pre><code># ติดตั้ง Tailscale บน Raspberry Pi
+curl -fsSL https://tailscale.com/install.sh | sh
+sudo tailscale up
+
+# ดู IP ส่วนตัว (Tailscale)
+tailscale ip -4
+
+# SSH จากเครื่องอื่น
+ssh pi@100.x.y.z</code></pre>
+    </div>
+
+    <!-- ==================== ESP32 ==================== -->
+    <div class="card">
+        <h2>7. เฟิร์มแวร์ ESP32 / PlatformIO</h2>
+        <p><strong>platformio.ini:</strong></p>
+        <pre><code>[env:esp32dev]
+platform = espressif32
+board = esp32dev
+framework = arduino
+monitor_speed = 115200
+lib_deps =
+    knolleary/PubSubClient @ ^2.8
+    bblanchon/ArduinoJson @ ^6.21.3</code></pre>
+
+        <p><strong>Non-blocking MQTT Reconnect (ใช้ millis):</strong></p>
+        <pre><code>unsigned long lastReconnectAttempt = 0;
+
+void loop() {
+    if (!client.connected()) {
+        unsigned long now = millis();
+        if (now - lastReconnectAttempt > 5000) {
+            lastReconnectAttempt = now;
+            if (client.connect("ESP32_Node")) {
+                client.subscribe("actuators/led");
+            }
+        }
+    } else {
+        client.loop();
+    }
+}</code></pre>
+
+        <p><strong>หลีกเลี่ยง Heap Fragmentation ด้วย StaticJsonDocument:</strong></p>
+        <pre><code>void sendTelemetry(float temp) {
+    // จองหน่วยความจำใน Stack (ปลอดภัยกว่า DynamicJsonDocument)
+    StaticJsonDocument<200> doc;
+    doc["sensor_name"] = "esp32_temp";
+    doc["value"] = temp;
+
+    char buffer[256];
+    serializeJson(doc, buffer);
+    client.publish("sensors/data", buffer);
+}</code></pre>
+
+        <p><strong>XSS Prevention ฝั่ง Dashboard JS:</strong></p>
+        <pre><code>// ❌ อันตราย — อย่าใช้
+element.innerHTML = data.sensor_name;
+
+// ✅ ปลอดภัย — ใช้ textContent เสมอ
+element.textContent = data.sensor_name;</code></pre>
+    </div>
+
+    <div class="citation">
+        <p>📖 <strong>แหล่งข้อมูลอ้างอิงหลัก:</strong></p>
+        <ul>
+            <li><a href="https://mosquitto.org/man/mosquitto_passwd-1.html" target="_blank">mosquitto_passwd Manual Page</a></li>
+            <li><a href="https://fastapi.tiangolo.com/tutorial/static-files/" target="_blank">FastAPI Static Files</a></li>
+            <li><a href="https://sqlite.org/wal.html" target="_blank">SQLite Write-Ahead Logging (WAL)</a></li>
+            <li><a href="https://docs.platformio.org/" target="_blank">PlatformIO Documentation</a></li>
+            <li><a href="https://tailscale.com/kb/quick-start/" target="_blank">Tailscale Getting Started</a></li>
+            <li><a href="https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/" target="_blank">Cloudflare Tunnel Documentation</a></li>
+        </ul>
+    </div>
+    <script src="../main.js"></script>
+</body>
+</html>

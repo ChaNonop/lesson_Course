@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lesson 5: การผสานการทำงานของ MQTT Client ภายใน FastAPI</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <h1>บทเรียนที่ 5: การผสานการทำงานของ MQTT Client ภายใน FastAPI</h1>
+    <p>ในบทนี้ เราจะเรียนรู้วิธีเขียน MQTT Client แบบครอบคลาสตามสไตล์ OOP, วิธีการเปิดใช้ DB Session ในเธรดเบื้องหลังอย่างปลอดภัย และเทคนิคป้องกันความสมบูรณ์ของข้อมูลจากการโจมตี Payload</p>
+
+    <div class="card">
+        <h2>Part 1: Encapsulated MQTT Client (OOP Wrapper Class)</h2>
+        <p>การเขียนโค้ดตามแนวทาง OOP ช่วยจัดระเบียบโครงสร้างของ MQTT ไคลเอนต์ให้เป็นสัดส่วน ปราศจากตัวแปร Global ที่ไม่ปลอดภัย:</p>
+        <pre><code>import paho.mqtt.client as mqtt
+from paho.mqtt.enums import CallbackAPIVersion
+import json
+
+class MqttManager:
+    def __init__(self, broker: str, port: int, topic: str, db_session_factory):
+        # กำหนดเวอร์ชัน API เป็น V2 ล่าสุดตามมาตรฐานความปลอดภัยใหม่
+        self.client = mqtt.Client(callback_api_version=CallbackAPIVersion.VERSION2)
+        self.broker = broker
+        self.port = port
+        self.topic = topic
+        self.session_factory = db_session_factory # ส่งตัวสร้างเซสชัน DB มาใช้งาน
+        
+        # ผูกฟังก์ชัน Callback
+        self.client.on_connect = self.on_connect
+        self.client.on_message = self.on_message
+
+    def on_connect(self, client, userdata, flags, reason_code, properties):
+        print(f"MQTT Status: Connected to Broker with Code {reason_code}")
+        self.client.subscribe(self.topic)
+
+    def on_message(self, client, userdata, msg):
+        # กระบวนการประมวลผลข้อความและส่งต่อฐานข้อมูล (ดูต่อใน Part 2 และ 3)
+        pass
+
+    def start(self):
+        self.client.connect(self.broker, self.port, 60)
+        self.client.loop_start() # สั่งทำงานเบื้องหลังโดยเริ่มเธรดใหม่แยกออกมา
+
+    def stop(self):
+        self.client.loop_stop()
+        self.client.disconnect()</code></pre>
+    </div>
+
+    <div class="card">
+        <h2>Part 2: Multi-threading Database Session Handling & Dynamic Data Payload</h2>
+        <p>เนื่องจากตัวควบคุมข้อความ <code>on_message</code> ทำงานอยู่ภายใต้เธรดเบื้องหลังของ MQTT client เราจึงส่งผ่าน <code>SessionLocal</code> เข้ามาในคลาส เพื่อเปิดและปิดเซสชันแยกต่างหากป้องกันฐานข้อมูลล็อก</p>
+        <p><strong>รูปแบบชุดข้อความเซ็นเซอร์ที่ได้รับ:</strong> เพื่อความยืดหยุ่นในระบบ IoT เราจะส่งข้อมูลจากบอร์ดต่างๆ เข้ามาในรูปของแบบโครงสร้าง Key-Value (EAV Format) ซึ่งโค้ดด้านล่างจะรองรับข้อมูลเซ็นเซอร์ทั้ง 3 ประเภทโดยอัตโนมัติ:</p>
+        <ul>
+            <li>อุณหภูมิ ESP32: <code>{"sensor_name": "esp32_temp", "value": 30.5}</code></li>
+            <li>ความชื้น ESP32: <code>{"sensor_name": "esp32_humidity", "value": 65.0}</code></li>
+            <li>แอนะล็อกสุ่ม ESP8266: <code>{"sensor_name": "esp8266_analog", "value": 520.0}</code></li>
+        </ul>
+        <pre><code>    def on_message(self, client, userdata, msg):
+        db = self.session_factory() # เปิด Session ในเธรดเบื้องหลังปัจจุบัน
+        try:
+            payload = json.loads(msg.payload.decode())
+            new_reading = models.SensorReading(
+                sensor_name=payload.get("sensor_name"),
+                value=float(payload.get("value"))
+            )
+            db.add(new_reading)
+            db.commit()
+            print(f"DB Thread Saved: {payload.get('sensor_name')}")
+        except Exception as e:
+            db.rollback()
+            print(f"Database Write Error: {e}")
+        finally:
+            db.close() # 💡 สำคัญมาก: ต้องคืน Session สู่ Pool เสมอเพื่อเลี่ยงหน่วยความจำรั่วไหล</code></pre>
+    </div>
+
+    <div class="card">
+        <h2>Part 3: Data Integrity & Payload Security</h2>
+        <p>เพื่อปกป้องระบบ IoT Hub จากข้อมูลเน่าเสีย (Corrupted) หรือการส่ง Payload ขนาดใหญ่เกินไปเพื่อจู่โจม RAM ของระบบ (Denial of Service - DoS) เราควรตั้งค่าควบคุมขนาดข้อมูล:</p>
+        <ul>
+            <li><strong>ตรวจความยาวไบต์ของ Payload:</strong> ตรวจจับและปฏิเสธข้อความที่ส่งมามีขนาดใหญ่เกินจริง (เช่นเกิน 512 ไบต์)</li>
+            <li><strong>บล็อกดักแปลง JSON:</strong> ป้องกันกรณี JSON มี Syntax ผิดพลาดด้วยบล็อก try-except ปิดไม่ให้เซิร์ฟเวอร์หลักหยุดทำงาน</li>
+        </ul>
+        <pre><code>    def on_message(self, client, userdata, msg):
+        # 1. 🛡️ ตรวจขนาดของ Payload ป้องกัน DoS
+        if len(msg.payload) > 512:
+            print("Warning: Payload size exceeded limit of 512 bytes!")
+            return
+
+        db = self.session_factory()
+        try:
+            # 2. 🛡️ ป้องกัน Json Parsing Error
+            payload_str = msg.payload.decode('utf-8')
+            payload = json.loads(payload_str)
+            
+            # 3. 🛡️ ตรวจความสะอาดเชิงตัวเลข
+            value = float(payload.get("value"))
+            
+            new_reading = models.SensorReading(
+                sensor_name=str(payload.get("sensor_name")),
+                value=value
+            )
+            db.add(new_reading)
+            db.commit()
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"Data Integrity Error (Invalid payload format): {e}")
+        except Exception as e:
+            db.rollback()
+            print(f"Generic error in thread: {e}")
+        finally:
+            db.close()</code></pre>
+    </div>
+
+    <div class="quiz">
+        <h2>🧠 ตรวจสอบความเข้าใจ (Quick Quiz)</h2>
+        <p>เหตุใดเราจึงไม่สามารถใช้ <code>Depends(get_db)</code> ใน callback function <code>on_message</code> ของ MQTT Client ได้?</p>
+        <div class="quiz-option" data-correct="false" data-feedback="ไม่จริง SQLite สามารถรันคำสั่งได้ แต่สโคป Depends ของ FastAPI ถูกสร้างมาเพื่อทำงานกับ HTTP Call เท่านั้น">A) เพราะ SQLite ไม่ยอมรับคำสั่งมัลติเธรดที่มีการเรียกใช้งานซ้อน</div>
+        <div class="quiz-option" data-correct="true" data-feedback="ถูกต้อง! callbacks ของ paho-mqtt วิ่งใน Thread เบื้องหลังที่เป็นอิสระจาก HTTP Request Loop ของ FastAPI ระบบ DI ของ FastAPI จึงไม่มี Context เข้าไปช่วยจัดสรร session ได้">B) เพราะ on_message รันใน Thread เบื้องหลัง ซึ่งอยู่นอกสโคป HTTP Request/Response ของ FastAPI</div>
+    </div>
+
+    <div class="citation">
+        <p>📖 <strong>ข้อมูลอ้างอิงและศึกษาเพิ่มเติม:</strong></p>
+        <ul>
+            <li>การจัดการ SQLAlchemy Session: <a href="https://docs.sqlalchemy.org/en/20/orm/session_basics.html" target="_blank">SQLAlchemy Session Basics</a></li>
+            <li>ความปลอดภัย JSON payload: <a href="https://owasp.org/www-project-api-security/" target="_blank">OWASP API Security Top 10</a></li>
+        </ul>
+        <p>💡 <em>ลิงก์บทเรียนย้อนหลัง: <a href="./0004-fastapi-sqlite-setup.html">บทเรียนที่ 4: ระบบ FastAPI และ SQLite</a></em></p>
+    </div>
+    <script src="../main.js"></script>
+</body>
+</html>

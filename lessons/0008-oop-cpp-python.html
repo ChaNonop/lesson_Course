@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lesson 8: พื้นฐาน OOP และหลักการ 4 เสาหลัก (C++ & Python)</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <h1>บทเรียนที่ 8: พื้นฐาน OOP และหลักการ 4 เสาหลัก (C++ & Python)</h1>
+    <p>ในบทเรียนนี้ เราจะปูพื้นฐานการเขียนโปรแกรมเชิงวัตถุ (Object-Oriented Programming) ซึ่งเป็นแนวคิดหลักในการพัฒนาทั้งระบบหลังบ้านด้วย Python (FastAPI) และเฟิร์มแวร์อุปกรณ์ด้วย C++ (PlatformIO)</p>
+
+    <div class="card">
+        <h2>Part 1: คลาส ออบเจกต์ แอตทริบิวต์ และเมธอด (Class, Object, Attribute, Method)</h2>
+        <p><strong>OOP (Object-Oriented Programming)</strong> คือการเขียนโปรแกรมที่มองทุกสิ่งเป็น "วัตถุ" (Object) ซึ่งถูกสร้างขึ้นจาก "แม่แบบ" หรือ "พิมพ์เขียว" (Class) โดยวัตถุแต่ละชิ้นจะประกอบไปด้วย:</p>
+        <ul>
+            <li><strong>Attribute (คุณลักษณะ/ข้อมูล):</strong> ตัวแปรที่เก็บสถานะของวัตถุนั้น เช่น ชื่อเซ็นเซอร์, ขาพอร์ตต่อเชื่อม, ค่าที่อ่านได้ล่าสุด</li>
+            <li><strong>Method (พฤติกรรม/ฟังก์ชัน):</strong> ฟังก์ชันภายในคลาสที่สั่งการวัตถุให้ทำสิ่งต่างๆ เช่น สั่งให้อ่านค่าจากพิน, สั่งเชื่อมต่อเน็ตเวิร์ก</li>
+        </ul>
+
+        <h3>เปรียบเทียบโครงสร้างใน Python และ C++</h3>
+        <p><strong>ฝั่ง Python (Backend):</strong></p>
+        <pre><code>class Sensor:
+    # Constructor (__init__) สำหรับกำหนดค่าเริ่มต้น
+    def __init__(self, name: str, pin: int):
+        self.name = name  # Attribute
+        self.pin = pin    # Attribute
+
+    # Method
+    def read_value(self) -> float:
+        print(f"Reading from {self.name} on pin {self.pin}")
+        return 25.5
+
+# การสร้างออบเจกต์ (Instance)
+temp_sensor = Sensor("DHT11", 4)
+val = temp_sensor.read_value()</code></pre>
+
+        <p><strong>ฝั่ง C++ (Firmware):</strong></p>
+        <pre><code>#include &lt;Arduino.h&gt;
+
+class Sensor {
+public:
+    String name;  // Attribute
+    int pin;      // Attribute
+
+    // Constructor (ชื่อเดียวกับ Class)
+    Sensor(String n, int p) {
+        name = n;
+        pin = p;
+    }
+
+    // Method
+    float readValue() {
+        Serial.print("Reading from " + name);
+        return 25.5;
+    }
+};
+
+// การสร้างออบเจกต์และเรียกใช้งาน Method (เรียกใช้งานภายในฟังก์ชันของ Arduino)
+void setup() {
+    Serial.begin(115200);
+    Sensor tempSensor("DHT11", 4);
+    float val = tempSensor.readValue();
+}
+
+void loop() {}
+</code></pre>
+    </div>
+
+    <div class="card">
+        <h2>Part 2: การห่อหุ้มข้อมูล (Encapsulation)</h2>
+        <p><strong>Encapsulation (การห่อหุ้ม):</strong> คือการจำกัดการเข้าถึงข้อมูลภายในออบเจกต์จากโค้ดภายนอก เพื่อป้องกันการแก้ไขค่าตัวแปรโดยตรงโดยไม่ผ่านฟังก์ชันการตรวจสอบความสะอาด (Getter/Setter) ช่วยรักษาเสถียรภาพและระบบความปลอดภัย</p>
+        
+        <h3>1. การทำ Encapsulation ใน C++</h3>
+        <p>ใช้คีย์เวิร์ดควบคุมการเข้าถึง (Access Specifiers) ได้แก่:</p>
+        <ul>
+            <li><code>public</code>: โค้ดภายนอกสามารถเรียกใช้และแก้ไขข้อมูลได้โดยตรง</li>
+            <li><code>private</code>: จำกัดให้เฉพาะฟังก์ชันที่อยู่ในคลาสเดียวกันเท่านั้นที่เข้าถึงได้</li>
+        </ul>
+        <pre><code>class SecureMqtt {
+private:
+    String password; // ซ่อนไม่ให้ภายนอกเห็นหรือแก้ไขได้โดยตรง
+
+public:
+    // Getter function
+    String getPassword() {
+        return password;
+    }
+
+    // Setter function พร้อมการตรวจสอบความปลอดภัยก่อนเขียนทับ
+    void setPassword(String pass) {
+        if (pass.length() >= 8) { // ป้องกันการตั้งรหัสผ่านสั้นเกินไป
+            password = pass;
+        }
+    }
+};</code></pre>
+
+        <h3>2. การทำ Encapsulation ใน Python</h3>
+        <p>Python ไม่มีคีย์เวิร์ด `private` โดยตรง แต่ใช้ข้อตกลงในการใส่เครื่องหมายนำหน้าตัวแปร:</p>
+        <ul>
+            <li><code>_variable</code> (Single Underscore): เป็นข้อตกลงว่าตัวแปรนี้ใช้ภายในคลาสเท่านั้น (Protected) โค้ดด้านนอกไม่ควรแก้ไขตรงๆ</li>
+            <li><code>__variable</code> (Double Underscore / Name Mangling): เป็นการสั่งให้ Python ซ่อนชื่อตัวแปรนี้ ป้องกันการแก้ไขจากภายนอกโดยตรง 100%</li>
+        </ul>
+        <pre><code>class DBConnection:
+    def __init__(self):
+        self.__db_url = "sqlite:///./secure.db"  # ซ่อนแอตทริบิวต์ (Private)
+
+    # Getter
+    def get_url(self):
+        return self.__db_url
+
+    # Setter พร้อมการตรวจสอบความสมบูรณ์
+    def set_url(self, new_url: str):
+        if new_url.startswith("sqlite:///"):
+            self.__db_url = new_url</code></pre>
+    </div>
+
+    <div class="card">
+        <h2>Part 3: การสืบทอดคุณลักษณะ (Inheritance)</h2>
+        <p><strong>Inheritance (การสืบทอด):</strong> คือการสร้างคลาสใหม่ (Child Class / Subclass) โดยสืบทอดตัวแปรและฟังก์ชันทั้งหมดมาจากคลาสที่มีอยู่แล้ว (Parent Class / Superclass) ช่วยลดความซ้ำซ้อนในการเขียนโค้ด (Code Reusability)</p>
+
+        <h3>1. การสืบทอดใน Python</h3>
+        <pre><code># Class แม่ (Parent)
+class NetworkDevice:
+    def __init__(self, ip: str):
+        self.ip = ip
+
+    def ping(self):
+        return f"Ping to {self.ip} OK"
+
+# Class ลูก (Child) สืบทอดคุณลักษณะและฟังก์ชันจาก NetworkDevice
+class ESP8266Device(NetworkDevice):
+    def __init__(self, ip: str, chip_id: str):
+        super().__init__(ip)  # เรียก Constructor ของ Class แม่มาทำงาน
+        self.chip_id = chip_id
+
+    # สามารถสร้างฟังก์ชันเฉพาะตัวเพิ่มได้
+    def get_chip_id(self):
+        return self.chip_id
+
+esp = ESP8266Device("192.168.1.50", "ESP8266_A420")
+print(esp.ping()) # เรียกใช้ฟังก์ชัน ping() ของคลาสแม่ได้ทันที</code></pre>
+
+        <h3>2. การสืบทอดใน C++</h3>
+        <pre><code>// Class แม่
+class BaseSensor {
+public:
+    int pin;
+    BaseSensor(int p) { pin = p; }
+    void init() { pinMode(pin, INPUT); }
+};
+
+// Class ลูก สืบทอดแบบ public จาก BaseSensor
+class AnalogRainSensor : public BaseSensor {
+public:
+    // โทรหา Constructor คลาสแม่ด้วย : BaseSensor(p)
+    AnalogRainSensor(int p) : BaseSensor(p) {}
+
+    int readRain() {
+        return analogRead(pin);
+    }
+};</code></pre>
+    </div>
+
+    <div class="card">
+        <h2>Part 4: การพหุสัณฐานและการทำงานแบบนามธรรม (Polymorphism & Abstraction)</h2>
+        
+        <h3>1. Polymorphism (การพหุสัณฐาน/หลายรูปแบบ)</h3>
+        <p>คือความสามารถของออบเจกต์คลาสลูกต่าง ๆ ในการตอบสนองต่อคำสั่งแบบเดียวกันในรูปแบบเฉพาะตัวของมันเอง (การเขียนทับเมธอด หรือ Method Overriding):</p>
+        <p><strong>ตัวอย่างใน C++ (ด้วย Virtual Functions):</strong></p>
+        <pre><code>class Device {
+public:
+    // กำหนดให้เป็น Virtual function เพื่อให้คลาสลูกไปเขียนทับได้
+    virtual void turnOn() {
+        Serial.println("Generic device power on");
+    }
+};
+
+class LEDDevice : public Device {
+public:
+    void turnOn() override { // เขียนทับฟังก์ชันของคลาสแม่
+        digitalWrite(2, HIGH);
+        Serial.println("LED turned ON!");
+    }
+};</code></pre>
+
+        <h3>2. Abstraction (การซ่อนรายละเอียดของระบบ/การสร้างโครงร่าง)</h3>
+        <p>คือการออกแบบโครงร่างหรือสัญญาข้อตกลง (Interface) โดยระบุว่าคลาสที่จะสืบทอดไปต้องมีฟังก์ชันใดบ้าง แต่ไม่ต้องเขียนรายละเอียดการทำงานจริงในคลาสแม่ ปล่อยให้คลาสลูกไปพัฒนาเอง:</p>
+        <p><strong>ตัวอย่าง Abstract Class ใน Python (ใช้ abc module):</strong></p>
+        <pre><code>from abc import ABC, abstractmethod
+
+# กำหนดเป็นคลาส Abstract (ไม่สามารถนำมารันสร้างออบเจกต์ตรงๆ ได้)
+class MqttConnection(ABC):
+    @abstractmethod
+    def connect(self):
+        pass
+
+class MyMqttClient(MqttConnection):
+    def connect(self):
+        # พัฒนาโค้ดเชื่อมต่อจริงที่นี่
+        print("Connected to Mosquitto MQTT Broker!")</code></pre>
+    </div>
+
+    <div class="quiz">
+        <h2>🧠 ตรวจสอบความเข้าใจ (Quick Quiz)</h2>
+        <p>ความสามารถในการสร้างคลาสย่อย (Child Class) ที่สามารถนำตัวแปรและฟังก์ชันการทำงานของคลาสแม่ (Parent Class) มาใช้งานซ้ำได้ทันทีเรียกว่าอะไรในหลักการ OOP?</p>
+        <div class="quiz-option" data-correct="false" data-feedback="ผิด! Encapsulation คือการซ่อนและห่อหุ้มข้อมูลตัวแปรไม่ให้เข้าถึงตรงๆ">A) Encapsulation (การห่อหุ้ม)</div>
+        <div class="quiz-option" data-correct="true" data-feedback="ถูกต้อง! Inheritance คือการสืบทอดโครงสร้างตัวแปรและฟังก์ชันการทำงานทั้งหมดจากคลาสหลักลงมายังคลาสย่อยเพื่อหลีกเลี่ยงการเขียนโค้ดซ้ำ">B) Inheritance (การสืบทอด)</div>
+        <div class="quiz-option" data-correct="false" data-feedback="ผิด! Polymorphism คือการที่ออบเจกต์ลูกสามารถเขียนทับเมธอดของแม่ให้ทำงานในรูปแบบของตัวเอง">C) Polymorphism (การพหุสัณฐาน)</div>
+    </div>
+
+    <div class="citation">
+        <p>📖 <strong>ข้อมูลอ้างอิงและศึกษาเพิ่มเติม:</strong></p>
+        <ul>
+            <li>หลักการ OOP 4 เสาหลัก: <a href="https://developer.mozilla.org/en-US/docs/Learn/JavaScript/Objects/Object-oriented_programming" target="_blank">Introduction to OOP concepts</a></li>
+            <li>การเขียน OOP ในภาษา Python: <a href="https://docs.python.org/3/tutorial/classes.html" target="_blank">Python Classes documentation</a></li>
+            <li>การเขียน OOP ใน C++: <a href="https://learn.microsoft.com/en-us/cpp/cpp/classes-and-structs-cpp" target="_blank">C++ Classes and Structs</a></li>
+        </ul>
+        <p>💡 <em>บทเรียนถัดไป: <a href="./0009-microcontroller-esp32-platformio.html">บทเรียนที่ 9: การพัฒนาเฟิร์มแวร์ ESP32/ESP8266 แบบไร้รอยต่อ</a></em></p>
+    </div>
+    <script src="../main.js"></script>
+</body>
+</html>

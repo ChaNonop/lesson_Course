@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lesson 3: พื้นฐาน Docker และการใช้งานในระบบ IoT Hub</title>
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <h1>บทเรียนที่ 3: พื้นฐาน Docker และการใช้งานในระบบ IoT Hub</h1>
+    <p>ในบทเรียนนี้ เราจะมาทำความเข้าใจว่า Docker คืออะไร แตกต่างจาก Virtual Machine อย่างไร เจาะลึกแนวคิดสำคัญ เช่น Image, Container, Volume, Network และเรียนรู้คำสั่งควบคุมพื้นฐานเพื่อพร้อมรันบริการต่าง ๆ บนบอร์ด IoT Hub</p>
+
+    <div class="card">
+        <h2>Part 1: Docker คืออะไร? (Containers vs Virtual Machines)</h2>
+        <p><strong>Docker</strong> เป็นแพลตฟอร์มในการบรรจุแอปพลิเคชันและสภาพแวดล้อมที่จำเป็นทั้งหมด (Libraries, Python runtime, Config) เข้าไว้ด้วยกันเป็นยูนิตเดี่ยวที่เรียกว่า <strong>Container</strong> เพื่อให้แอปพลิเคชันทำงานได้เหมือนกันในทุกระบบปฏิบัติการ ไม่ว่าจะเป็นบนโน้ตบุ๊กทีมพัฒนา หรือบนบอร์ดคอมพิวเตอร์ขนาดเล็ก (Raspberry Pi/Mini PC)</p>
+        
+        <h3>เปรียบเทียบกับ Virtual Machine (VM)</h3>
+        <ul>
+            <li><strong>Virtual Machine (เช่น VMware, VirtualBox):</strong> จำลองฮาร์ดแวร์ขึ้นมาใหม่ทั้งหมด และต้องลงระบบปฏิบัติการแยกเฉพาะ (Guest OS) ทับลงไป ทำให้กินทรัพยากรสูง (RAM หลาย GB) และบูตช้าเพราะต้องโหลด OS ใหม่</li>
+            <li><strong>Docker Container:</strong> ใช้ Kernel ของระบบปฏิบัติการหลัก (Host OS) ร่วมกัน และทำลายสิ่งกีดขวางเฉพาะพื้นที่ทำงานของแอปพลิเคชัน (OS virtualization) ทำให้มีขนาดเล็กมาก (หลักสิบ/ร้อย MB) บูตเสร็จภายในเศษเสี้ยววินาที และใช้แรมต่ำมาก เหมาะสมอย่างยิ่งสำหรับบอร์ด IoT ที่มีแรมจำกัด</li>
+        </ul>
+        <div class="highlight-box">
+            <strong>💡 มุมมองประสิทธิภาพบน IoT:</strong> การใช้ Docker ช่วยประหยัด RAM บนบอร์ด Raspberry Pi ไปได้มหาศาลเมื่อเทียบกับ VM ทำให้เราสามารถรันทั้ง MQTT Broker และ FastAPI Backend ได้พร้อมกันในเนื้อที่แรมไม่กี่ร้อยเมกะไบต์
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Part 2: 4 เสาหลักของ Docker (Core Concepts)</h2>
+        <p>การใช้งาน Docker จำเป็นต้องเข้าใจ 4 ออบเจกต์หลักที่ทำงานสัมพันธ์กันดังนี้:</p>
+        <ol>
+            <li><strong>Docker Image (พิมพ์เขียว):</strong> ไฟล์แม่แบบที่เก็บรหัสซอร์สโค้ด รันไทม์ ไลบรารี และคอนฟิกของแอปพลิเคชันไว้ มีสถานะ Read-only (อ่านอย่างเดียว) เปรียบเสมือนแผ่น CD-ROM ติดตั้งโปรแกรม</li>
+            <li><strong>Docker Container (การสวมหัวรัน):</strong> ตัวประมวลผลที่เกิดจากการนำพิมพ์เขียว (Image) มารันให้ทำงานจริง เป็นพื้นที่เขียนอ่านได้ชั่วคราว (Writable Layer) โดยตู้คอนเทนเนอร์นี้จะถูกตัดขาดจากภายนอกเพื่อความปลอดภัย</li>
+            <li><strong>Docker Volume (ระบบยึดข้อมูลถาวร):</strong> เนื่องจากธรรมชาติของ Container จะสูญเสียข้อมูลทั้งหมดข้างในทันทีเมื่อ Container ถูกลบหรือรีสตาร์ท (Stateless) เราจึงต้องเมาท์โฟลเดอร์ภายนอก (Host) เข้าไปในตู้คอนเทนเนอร์เพื่อให้ข้อมูลต่างๆ เช่น ไฟล์ฐานข้อมูล SQLite หรือไฟล์ Log ถูกเก็บไว้ได้อย่างถาวรแม้ตู้จะระเบิดไป</li>
+            <li><strong>Docker Network (ระบบเครือข่ายส่วนตัว):</strong> ช่วยเชื่อมสายสัญญาณจำลองระหว่าง Container ต่างๆ ให้อยู่ในวงเน็ตเวิร์กเดียวกัน (Bridge Network) เพื่อให้สามารถเชื่อมต่อข้ามกล่องกันได้ เช่น FastAPI Backend คุยกับ Mosquitto Broker โดยอ้างอิงชื่อบริการ แทนการอ้างอิง IP Address</li>
+        </ol>
+    </div>
+
+    <div class="card">
+        <h2>Part 3: คำสั่งควบคุม Docker ที่ใช้งานบ่อย (Essential Commands)</h2>
+        <p>คำสั่ง CLI พื้นฐานที่นักพัฒนา IoT Hub ต้องฝึกฝนและหัดสั่งงานผ่าน Terminal:</p>
+        
+        <h3>1. ดึงภาพและเปิดตู้ทำงาน (docker run)</h3>
+        <pre><code>docker run -d --name my_mosquitto -p 1883:1883 -v ./config:/mosquitto/config eclipse-mosquitto</code></pre>
+        <p><em>คำอธิบายพารามิเตอร์:</em></p>
+        <ul>
+            <li><code>-d</code>: รันแบบเบื้องหลัง (Background/Detached)</li>
+            <li><code>--name</code>: ตั้งชื่อตู้คอนเทนเนอร์ให้จำง่าย</li>
+            <li><code>-p 1883:1883</code>: จับคู่พอร์ต (Port mapping) จากพอร์ตภายนอกของเครื่อง Host ไปยังพอร์ตภายในของตู้</li>
+            <li><code>-v</code>: เชื่อมโยงโฟลเดอร์เพื่อจัดเก็บข้อมูลถาวร (Volume Mount)</li>
+        </ul>
+
+        <h3>2. ตรวจสอบสถานะการทำงาน (docker ps)</h3>
+        <p>ใช้ส่องดูว่าตู้คอนเทนเนอร์ใดเปิดทำงานอยู่บ้าง หรือมีตู้ใดที่กำลังปิดการทำงานกระทันหัน:</p>
+        <pre><code># ตรวจสอบตู้ที่กำลังรันอยู่ปัจจุบัน
+docker ps
+
+# ตรวจสอบตู้ทั้งหมด รวมถึงตู้ที่หยุดทำงานไปแล้ว
+docker ps -a</code></pre>
+
+        <h3>3. ตรวจสอบบันทึกเหตุการณ์การประมวลผล (docker logs)</h3>
+        <p>ใช้ดีบักข้อผิดพลาด เช่น ดูว่าทำไมบอร์ดต่อเข้า broker ไม่ติด หรือเซิร์ฟเวอร์ไพทอนขึ้น error ตัวใด:</p>
+        <pre><code>docker logs -f my_mosquitto</code></pre>
+        <p><em>(กด <code>Ctrl+C</code> เพื่อออกจากหน้าแสดง Log)</em></p>
+
+        <h3>4. การควบคุมและทำลาย (stop / start / rm)</h3>
+        <pre><code># หยุดการทำงานชั่วคราว
+docker stop my_mosquitto
+
+# เริ่มทำงานใหม่อีกครั้ง
+docker start my_mosquitto
+
+# ลบตู้คอนเทนเนอร์ทิ้ง (ต้องหยุดตู้ก่อนลบ)
+docker rm my_mosquitto</code></pre>
+    </div>
+
+    <div class="card">
+        <h2>Part 4: Docker Compose เบื้องต้น (Multi-Container Orchestration)</h2>
+        <p>เมื่อแอปพลิเคชันมีโครงสร้างซับซ้อนและประกอบด้วยหลายส่วนทำงานร่วมกัน (เช่น Mosquitto + FastAPI + SQLite) การพิมพ์คำสั่ง <code>docker run</code> ทีละตู้เป็นเรื่องยุ่งยากและเสียเวลา เราจึงใช้ <strong>Docker Compose</strong> ในการเขียนคอนฟิกแบบประกาศตัวแปรตัวเดียวลงในไฟล์ <code>docker-compose.yml</code>:</p>
+        <pre><code>version: '3.8'
+services:
+  mqtt:
+    image: eclipse-mosquitto:latest
+    ports:
+      - "1883:1883"
+  backend:
+    image: fastapi_app:latest
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mqtt</code></pre>
+        <p>ด้วยโครงสร้างนี้ เราสามารถสั่งรันบริการทั้งหมดขึ้นมาพร้อมเชื่อมต่อเครือข่ายให้เสร็จสรรพผ่านคำสั่งเดียว:</p>
+        <pre><code># สั่งรันบริการทั้งหมดขึ้นมาในโหมดเบื้องหลัง
+docker compose up -d
+
+# สั่งปิดและทำลายตู้ในโปรเจคทั้งหมดทิ้งพร้อมกัน
+docker compose down</code></pre>
+    </div>
+
+    <div class="quiz">
+        <h2>🧠 ตรวจสอบความเข้าใจ (Quick Quiz)</h2>
+        <p>ทำไมเราจึงจำเป็นต้องใช้งาน Docker Volume (ตัวแปร -v) เมื่อต้องการทำระบบ MQTT Broker หรือ SQLite Database ใน Docker Container?</p>
+        <div class="quiz-option" data-correct="false" data-feedback="ผิด! Docker network เป็นตัวดูแลพอร์ตการรับส่งข้อมูล ไม่ใช่ Volume">A) เพื่อช่วยเปิดพอร์ตเครือข่ายให้ ESP32 สามารถติดต่อเข้ามาที่เซิร์ฟเวอร์ได้</div>
+        <div class="quiz-option" data-correct="true" data-feedback="ถูกต้อง! Container ไม่มีสถานะข้อมูลถาวร ข้อมูลจะหายหมดเมื่อ Container หยุดทำงานหรือถูกสร้างตู้ใหม่ การใช้ Volume เพื่อบันทึกข้อมูลเก็บไว้บน Host OS ด้านนอกตู้จึงเป็นเรื่องที่จำเป็นมากในการเก็บรักษาฐานข้อมูล">B) เพื่อรักษาฐานข้อมูลหรือไฟล์คอนฟิกให้ยังคงอยู่อย่างถาวร แม้ตู้คอนเทนเนอร์จะถูกหยุดทำงาน หรือลบทิ้งไป</div>
+    </div>
+
+    <div class="citation">
+        <p>📖 <strong>ข้อมูลอ้างอิงและศึกษาเพิ่มเติม:</strong></p>
+        <ul>
+            <li>เปรียบเทียบเชิงลึก Containers vs VMs: <a href="https://www.docker.com/resources/what-container/" target="_blank">Docker What is a Container?</a></li>
+            <li>คู่มือคำสั่ง Command Line ของ Docker: <a href="https://docs.docker.com/engine/reference/commandline/cli/" target="_blank">Docker CLI Reference</a></li>
+        </ul>
+        <p>💡 <em>บทเรียนถัดไป: <a href="./0004-fastapi-sqlite-setup.html">บทเรียนที่ 4: การจัดทำระบบ FastAPI และ SQLite</a></em></p>
+    </div>
+    <script src="../main.js"></script>
+</body>
+</html>
